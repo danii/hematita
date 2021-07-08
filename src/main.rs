@@ -1,3 +1,4 @@
+mod parse;
 
 #[derive(Debug)]
 enum OpCode<'s> {
@@ -72,7 +73,7 @@ enum UnaryOperation {
 }
 
 #[derive(Debug)]
-struct Function {
+pub struct Function {
 	constants: Vec<Value>,
 	opcodes: Vec<OpCode<'static>>
 }
@@ -90,7 +91,8 @@ enum Value {
 	String(Box<str>),
 	Boolean(bool),
 	Function(Arc<Function>),
-	Table(Arc<Table>)
+	Table(Arc<Table>),
+	NativeFunction(fn(Arc<Table>) -> Value)
 }
 
 impl Eq for Value {}
@@ -103,6 +105,7 @@ impl PartialEq for Value {
 			(Self::Boolean(a), Self::Boolean(b)) => *a == *b,
 			(Self::Function(a), Self::Function(b)) => Arc::as_ptr(a) == Arc::as_ptr(b),
 			(Self::Table(a), Self::Table(b)) => Arc::as_ptr(a) == Arc::as_ptr(b),
+			(Self::NativeFunction(a), Self::NativeFunction(b)) => a == b,
 			_ => false
 		}
 	}
@@ -115,7 +118,8 @@ impl std::hash::Hash for Value {
 			Self::String(string) => string.hash(state),
 			Self::Boolean(boolean) => boolean.hash(state),
 			Self::Function(arc) => Arc::as_ptr(arc).hash(state),
-			Self::Table(arc) => Arc::as_ptr(arc).hash(state)
+			Self::Table(arc) => Arc::as_ptr(arc).hash(state),
+			Self::NativeFunction(func) => func.hash(state)
 		}
 	}
 }
@@ -124,13 +128,29 @@ impl std::hash::Hash for Value {
 	//stack: HashMap<
 //}
 
-fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>) -> Value {
+fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>) -> Option<Value> {
 	let mut index = 0;
 	loop {
-		println!("{:?}\n{:?}\n", function.opcodes[index], local);
-
 		match function.opcodes[index] {
-			// OpCode::Call
+			OpCode::Call {arguments, function, ..} => {
+				let func = local.get(&Value::String(function.to_string().into_boxed_str()));
+				let args = local.get(&Value::String(arguments.to_string().into_boxed_str()));
+
+				let args = match args {
+					Some(Value::Table(table)) => table,
+					_ => todo!()
+				};
+
+				match func {
+					Some(Value::NativeFunction(func)) => {
+						func(args.clone());
+					},
+					Some(Value::Function(_)) => todo!(),
+					_ => todo!()
+				}
+
+				// TODO: Fn stuff blah.
+			},
 			// OpCode::IndexRead
 			OpCode::IndexWrite {indexee, index, value} => {
 				let indexee = Value::String(indexee.to_string().into_boxed_str());
@@ -182,14 +202,16 @@ fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>) -> Value {
 					_ => todo!()
 				}
 			},
-			OpCode::Return {result} => break local.remove(&Value::String(result.to_string().into_boxed_str())).unwrap(),
+			OpCode::Return {result} => break Some(local.remove(&Value::String(result.to_string().into_boxed_str())).unwrap()),
 			_ => todo!()
 		}
 
 		index = index + 1;
+		if index == function.opcodes.len() {return None}
 	}
 }
 
+/*
 fn main() {
 	let function = Arc::new(Function {
 		constants: vec![Value::Integer(0)],
@@ -238,4 +260,19 @@ fn main() {
 		Value::String("b".to_string().into_boxed_str()) => Value::Integer(1)
 	};
 	println!("{:?}", execute(function, args));
+}*/
+
+fn print(args: Arc<Table>) -> Value {
+	println!("{:?}", args);
+
+	Value::Integer(0)
+}
+
+fn main() {
+	use parse::dord;
+
+	let func = dord(std::fs::File::open("test.lua").unwrap());
+	execute(Arc::new(func), maplit::hashmap! {
+		Value::String("print".to_string().into_boxed_str()) => Value::NativeFunction(print)
+	});
 }
