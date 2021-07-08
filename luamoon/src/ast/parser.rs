@@ -1,7 +1,6 @@
 //use self::super::{OpCode, Value, Function};
 use self::super::lexer::Token;
 use std::{fmt::{Display, Formatter, Result as FMTResult}, iter::Peekable};
-use itertools::Itertools;
 
 /// Parses a block of lua tokens.
 pub fn parse(iter: &mut Peekable<impl Iterator<Item = Token>>) -> Block {

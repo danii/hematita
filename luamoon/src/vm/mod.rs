@@ -68,13 +68,13 @@ pub enum OpCode<'s> {
 }
 
 #[derive(Debug)]
-enum BinaryOperation {
+pub enum BinaryOperation {
 	LessThan,
 	LessThanOrEqual
 }
 
 #[derive(Debug)]
-enum UnaryOperation {
+pub enum UnaryOperation {
 	Not
 }
 

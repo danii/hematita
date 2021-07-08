@@ -1,0 +1,9 @@
+[package]
+name = "playground"
+version = "0.1.0"
+edition = "2018"
+authors = ["Daniel Conley <himself@danii.dev>"]
+
+[dependencies]
+luamoon = {path = "../luamoon"}
+maplit = "1.0.2"

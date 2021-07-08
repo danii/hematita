@@ -1,8 +1,4 @@
-mod ast;
-mod lua_lib;
-mod vm;
-
-use self::{
+use luamoon::{
 	ast::{lexer::Lexer, parser::parse},
 	lua_lib::print,
 	vm::{bytecode::generate_bytecode, Value, execute}
