@@ -1,9 +1,7 @@
-// bits n bobs i havent put into the right modules yet
-
-mod parse;
+pub mod bytecode;
 
 #[derive(Debug)]
-enum OpCode<'s> {
+pub enum OpCode<'s> {
 	/// Calls the a value with the identifier [0], with [1] arguments, and store
 	/// the result into [2].
 	Call {
@@ -29,6 +27,12 @@ enum OpCode<'s> {
 
 	Load {
 		constant: u16,
+		destination: &'s str,
+		destination_local: bool
+	},
+
+	ReAssign {
+		actor: &'s str,
 		destination: &'s str,
 		destination_local: bool
 	},
@@ -81,20 +85,20 @@ pub struct Function {
 }
 
 #[derive(Debug)]
-struct Table(Mutex<HashMap<Value, Value>>);
+pub struct Table(pub Mutex<HashMap<Value, Value>>);
 
 use std::{collections::HashMap, sync::{Arc, Mutex}};
 
 #[derive(Debug, Clone)]
 #[warn(clippy::large_enum_variant)]
-enum Value {
+pub enum Value {
 	Integer(i64),
 	//Float(f64),
 	String(Box<str>),
 	Boolean(bool),
 	Function(Arc<Function>),
 	Table(Arc<Table>),
-	NativeFunction(fn(Arc<Table>) -> Value)
+	NativeFunction(fn(Arc<Table>) -> Arc<Table>)
 }
 
 impl Eq for Value {}
@@ -130,7 +134,7 @@ impl std::hash::Hash for Value {
 	//stack: HashMap<
 //}
 
-fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>) -> Option<Value> {
+pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>) -> Option<Value> {
 	let mut index = 0;
 	loop {
 		match function.opcodes[index] {
@@ -165,7 +169,8 @@ fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>) -> Option<
 
 				match indexee {
 					Some(Value::Table(table)) => {
-						table.0.lock().unwrap().insert(index.unwrap().clone(), value.unwrap().clone());
+						table.0.lock().unwrap().insert(index.unwrap().clone(),
+						value.unwrap().clone());
 					},
 					_ => todo!()
 				}
@@ -264,17 +269,3 @@ fn main() {
 	println!("{:?}", execute(function, args));
 }*/
 
-fn print(args: Arc<Table>) -> Value {
-	println!("{:?}", args);
-
-	Value::Integer(0)
-}
-
-fn main() {
-	use parse::dord;
-
-	let func = dord(std::fs::File::open("test.lua").unwrap());
-	execute(Arc::new(func), maplit::hashmap! {
-		Value::String("print".to_string().into_boxed_str()) => Value::NativeFunction(print)
-	});
-}

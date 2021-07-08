@@ -86,9 +86,9 @@ pub fn parse_expression(iter: &mut Peekable<impl Iterator<Item = Token>>)
 
 pub fn parse_inner_expression(iter: &mut Peekable<impl Iterator<Item = Token>>,
 		actor: Expression) -> Expression {
-	match iter.peek().unwrap() {
+	match iter.peek() {
 		// actor.
-		Token::Period => match {iter.next(); iter.next().unwrap()} {
+		Some(Token::Period) => match {iter.next(); iter.next().unwrap()} {
 			// actor.identifier
 			Token::Identifier(index) => {
 				let expression = Expression::Index {
@@ -101,7 +101,7 @@ pub fn parse_inner_expression(iter: &mut Peekable<impl Iterator<Item = Token>>,
 			_ => todo!()
 		},
 		// actor[]
-		Token::OpenBracket => {
+		Some(Token::OpenBracket) => {
 			iter.next();
 			let expression = Expression::Index {
 				indexee: Box::new(actor),
@@ -113,7 +113,7 @@ pub fn parse_inner_expression(iter: &mut Peekable<impl Iterator<Item = Token>>,
 			parse_inner_expression(iter, result)
 		},
 		// actor + / -
-		Token::Add | Token::Subtract => {
+		Some(Token::Add | Token::Subtract) => {
 			Expression::BinaryOperation {
 				left: Box::new(actor),
 				operator: if matches!(iter.next().unwrap(), Token::Add)
@@ -122,7 +122,7 @@ pub fn parse_inner_expression(iter: &mut Peekable<impl Iterator<Item = Token>>,
 			}
 		},
 		// actor()
-		Token::OpenParen => {
+		Some(Token::OpenParen) => {
 			iter.next();
 
 			let mut arguments = Vec::new();
@@ -249,7 +249,7 @@ impl Display for BinaryOperator {
 }
 
 #[derive(Debug)]
-pub struct Block(Vec<Statement>);
+pub struct Block(pub Vec<Statement>);
 
 impl Display for Block {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
