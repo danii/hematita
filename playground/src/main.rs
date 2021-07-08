@@ -1,9 +1,5 @@
-use luamoon::{
-	ast::{lexer::Lexer, parser::parse},
-	lua_lib::print,
-	vm::{bytecode::generate_bytecode, Value, execute}
-};
-use std::{fs::File, io::Read, sync::Arc};
+use luamoon::{ast::{lexer::Lexer, parser::parse}, lua_lib::print, vm::{Table, Value, bytecode::generate_bytecode, execute}};
+use std::{fs::File, io::Read, sync::{Arc, Mutex}};
 
 fn main() {
 	let mut code = String::new();
@@ -15,10 +11,19 @@ fn main() {
 	let function = generate_bytecode(block);
 	let local = maplit::hashmap! {
 		Value::String("print".to_owned().into_boxed_str()) =>
-			Value::NativeFunction(print)
+			Value::NativeFunction(print),
+		Value::String("a".to_owned().into_boxed_str()) =>
+			Value::Table(Arc::new(Table(Mutex::new(maplit::hashmap! {
+				Value::String("b".to_owned().into_boxed_str()) =>
+					Value::Integer(10)
+			}))))
 	};
 
-	execute(Arc::new(function), local);
+	println!("{:#?}", function);
+
+	execute(Arc::new(function), local, maplit::hashmap! {
+		
+	});
 
 	//println!("{:?}", lexer.collect::<Vec<_>>());
 }

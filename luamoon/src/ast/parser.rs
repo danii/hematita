@@ -8,7 +8,7 @@ pub fn parse(iter: &mut Peekable<impl Iterator<Item = Token>>) -> Block {
 
 	loop {
 		match iter.peek() {
-			Some(Token::SemiColon) => (),
+			Some(Token::SemiColon) => {iter.next();},
 
 			Some(Token::Identifier(_)) => match parse_expression(iter) {
 				Expression::Call {function, arguments} => {

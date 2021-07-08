@@ -1,33 +1,80 @@
 pub mod bytecode;
 
+/// The operation codes used within the lua virtual machine. All lua code is
+/// compiled to blocks of opcodes. Opcodes are the primitive block of "action"
+/// (lua code ran from this vm cannot perform any actions more specific than
+/// what these opcodes can provide). Each opcode does a different thing, but
+/// most opcodes operate with memory directly from the local scope via symbols.
+///
+/// Typically, the lua compiler will use temporary variable names that cannot
+/// be accessed from lua directly. All of these temporary variables start with
+/// a left parenthesis, because that makes these variables impossible to access
+/// or alter accidentally in lua. Theoretically, you can use methods from the
+/// debug module to access these temporary variables, but tampering with them
+/// won't do much more than corrupt the state of the currently executing
+/// function.
 #[derive(Debug)]
 pub enum OpCode<'s> {
-	/// Calls the a value with the identifier [0], with [1] arguments, and store
-	/// the result into [2].
+	/// Calls a function with the name [function], with the arguments array
+	/// [arguments], and stores the result array in [destination]. [arguments]
+	/// must be a lua array (a table, typically with numbered keys starting from
+	/// 1), or else an error will be thrown.
+	///
+	/// [destination_local] determines if the result will be stored to the local
+	/// scope or global scope.
 	Call {
+		/// The name of the function, in scope, to be called. Must be a function
+		/// or else an error will be thrown.
 		function: &'s str,
+		/// The name of the arguments array, in scope. Must be a table or else an
+		/// error will be thrown.
 		arguments: &'s str,
+		/// The name of where the return values will be stored.
 		destination: &'s str,
+		/// Whether or not the return values will be stored in the local scope or
+		/// global scope.
 		destination_local: bool
 	},
 
-	/// Value to index, index with, store.
+	/// Indexes into the object with the name [indexee], with index [index], and
+	/// stores the result in [destination].
+	///
+	/// [destination_local] determines if the result will be stored to the local
+	/// scope or global scope.
 	IndexRead {
+		/// The name of the object to be indexed.
 		indexee: &'s str,
+		/// The name of the object that serves as the index.
 		index: &'s str,
+		/// The name of where the result will be stored.
 		destination: &'s str,
+		/// Whether or not the result will be stored in the local scope or global
+		/// scope.
 		destination_local: bool
 	},
 
+	/// Indexes into the object with the name [indexee], with index [index], and
+	/// writes [value] into [indexee].
 	IndexWrite {
+		/// The name of the object to be indexed.
 		indexee: &'s str,
+		/// The name of the object that serves as the index.
 		index: &'s str,
+		/// The name of the value to be stored within the indexee.
 		value: &'s str
 	},
 
+	/// Loads a value from the constant pool at index [constant] to [destination].
+	///
+	/// [destination_local] determines if the constant will be stored to the local
+	/// scope or global scope.
 	Load {
+		/// The constant to be loaded.
 		constant: u16,
+		/// The name of where the constant will be stored.
 		destination: &'s str,
+		/// Whether or not the constant will be stored in the local scope or global
+		/// scope.
 		destination_local: bool
 	},
 
@@ -37,8 +84,15 @@ pub enum OpCode<'s> {
 		destination_local: bool
 	},
 
+	/// Creates a new empty table at [destination].
+	///
+	/// [destination_local] determines if the new table will be stored to the
+	/// local scope or global scope.
 	Create {
+		/// The name of where the new table will be stored.
 		destination: &'s str,
+		/// Whether or not the new table will be stored in the local scope or global
+		/// scope.
 		destination_local: bool
 	},
 
@@ -57,8 +111,15 @@ pub enum OpCode<'s> {
 		operation: UnaryOperation
 	},
 
+	/// Jumps unconditionally to [operation], or conditionally if the name of a
+	/// condition is specified in [r#if]. The jump operation is performed in
+	/// number of opcodes, not bytes.
 	Jump {
+		/// The opcode to jump to.
 		operation: u64,
+		/// An optional condition. If specified, the value at the specified name
+		/// must be true or false, otherwise an error will be thrown. If true, the
+		/// jump will occur, otherwise it will not.
 		r#if: Option<&'s str>
 	},
 
@@ -134,8 +195,12 @@ impl std::hash::Hash for Value {
 	//stack: HashMap<
 //}
 
-pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>) -> Option<Value> {
-	let mut index = 0;
+/// Executes a function.
+pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
+		mut global: HashMap<Value, Value>) -> Option<Value> {
+	let mut index = 0; // The current opcode we're evaluating.
+	// current_opcode
+
 	loop {
 		match function.opcodes[index] {
 			OpCode::Call {arguments, function, ..} => {
@@ -157,7 +222,24 @@ pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>) -> Opt
 
 				// TODO: Fn stuff blah.
 			},
-			// OpCode::IndexRead
+			OpCode::IndexRead {indexee, index, destination, ..} => {
+				let indexee = Value::String(indexee.to_string().into_boxed_str());
+				let index = Value::String(index.to_string().into_boxed_str());
+				let destination = Value::String(destination.to_string().into_boxed_str());
+
+				let indexee = local.get(&indexee);
+				let index = local.get(&index);
+
+				match indexee {
+					Some(Value::Table(table)) => {
+						let table = table.0.lock().unwrap();
+						let value = table.get(index.unwrap()).unwrap().clone();
+						drop(table);
+						local.insert(destination, value);
+					},
+					_ => todo!()
+				}
+			},
 			OpCode::IndexWrite {indexee, index, value} => {
 				let indexee = Value::String(indexee.to_string().into_boxed_str());
 				let index = Value::String(index.to_string().into_boxed_str());
@@ -169,8 +251,7 @@ pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>) -> Opt
 
 				match indexee {
 					Some(Value::Table(table)) => {
-						table.0.lock().unwrap().insert(index.unwrap().clone(),
-						value.unwrap().clone());
+						table.0.lock().unwrap().insert(index.unwrap().clone(), value.unwrap().clone());
 					},
 					_ => todo!()
 				}
@@ -217,55 +298,3 @@ pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>) -> Opt
 		if index == function.opcodes.len() {return None}
 	}
 }
-
-/*
-fn main() {
-	let function = Arc::new(Function {
-		constants: vec![Value::Integer(0)],
-		opcodes: vec![
-			OpCode::BinaryOperation { // (t0 = a <= b
-				first_operand: "a",
-				second_operand: "b",
-				destination: "(t0",
-				destination_local: true,
-				operation: BinaryOperation::LessThanOrEqual
-			},
-			OpCode::Create { // (r = {}
-				destination: "(r",
-				destination_local: true
-			},
-			OpCode::Load { // (t1 = 0
-				constant: 0, // Number 0
-				destination: "(t1",
-				destination_local: true
-			},
-			OpCode::Jump { // if (t0 then goto 7 end
-				operation: 6,
-				r#if: Some("(t0")
-			},
-			OpCode::IndexWrite {
-				indexee: "(r",
-				index: "(t1",
-				value: "a"
-			},
-			OpCode::Return {
-				result: "(r"
-			},
-			OpCode::IndexWrite {
-				indexee: "(r",
-				index: "(t1",
-				value: "b"
-			},
-			OpCode::Return {
-				result: "(r"
-			}
-		]
-	});
-
-	let args = maplit::hashmap! {
-		Value::String("a".to_string().into_boxed_str()) => Value::Integer(5),
-		Value::String("b".to_string().into_boxed_str()) => Value::Integer(1)
-	};
-	println!("{:?}", execute(function, args));
-}*/
-
