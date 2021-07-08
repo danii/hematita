@@ -1,5 +1,137 @@
 pub mod bytecode;
 
+use std::{
+	collections::HashMap,
+	fmt::{Display, Formatter, Result as FMTResult},
+	hash::{Hash, Hasher},
+	sync::{Arc, Mutex}
+};
+
+/// Executes a function.
+pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
+		mut _global: HashMap<Value, Value>) -> Result<Option<Value>, String> {
+	let mut index = 0; // The current opcode we're evaluating.
+	// current_opcode
+
+	loop {
+		match function.opcodes[index] {
+			OpCode::Call {arguments, function, ..} => {
+				let args = match local.get(&Value::identifier(arguments)) {
+					Some(Value::Table(table)) => table,
+					// args is not a table.
+					args => break Err(format!(
+						"attempt to initiate a function call with a {} value",
+							Value::type_name(args)))
+				};
+
+				match local.get(&Value::identifier(function)) {
+					Some(Value::NativeFunction(func)) => {
+						// TODO: Return...
+						func(args.clone());
+					},
+					// TODO: Fn stuff blah.
+					Some(Value::Function(_)) => todo!(),
+					// func is not a function.
+					func => break Err(format!(
+						"attempt to call a {} value", Value::type_name(func)))
+				}
+			},
+
+			OpCode::IndexRead {indexee, index, destination, ..} =>
+					match local.get(&Value::identifier(indexee)) {
+				// indexee is a table.
+				Some(Value::Table(table)) => {
+					let index = local.get(&Value::identifier(index))
+						.ok_or("table index is nil".to_owned())?; // table index is nil.
+					let table = table.data.lock().unwrap();
+					let value = table.get(index).map(Clone::clone);
+					drop(table); // Borrow checker stuff.
+
+					let destination = Value::identifier(destination);
+					// value is not nil.
+					if let Some(value) = value {
+						local.insert(destination, value);
+					// value is nil.
+					} else {
+						local.remove(&destination);
+					}
+				},
+				// indexee is not a table.
+				indexee => break Err(format!(
+					"attempt to index a {} value", Value::type_name(indexee)))
+			},
+
+			OpCode::IndexWrite {indexee, index, value} =>
+					match local.get(&Value::identifier(indexee)) {
+				// indexee is a table.
+				Some(Value::Table(table)) => {
+					let mut lock = table.data.lock().unwrap();
+					let index = local.get(&Value::identifier(index))
+						.ok_or("table index is nil".to_owned())?; // index is nil.
+
+						// value is not nil.
+						if let Some(value) = local.get(&Value::identifier(value)) {
+							lock.insert(index.clone(), value.clone());
+						// value is nil.
+					} else {
+						lock.remove(index);
+					}
+				},
+				// indexee is not a table.
+				indexee => break Err(format!(
+					"attempt to index a {} value", Value::type_name(indexee)))
+			},
+
+			OpCode::Load {constant, destination, ..} =>
+					match function.constants.get(constant as usize) {
+				// constant is not nil.
+				Some(constant) =>
+					{local.insert(Value::identifier(destination), constant.clone());},
+				// constant is.... nil?
+				None => {local.remove(&Value::identifier(destination));}
+			},
+
+			OpCode::Create {destination, ..} =>
+				{local.insert(Value::identifier(destination),
+					Value::Table(Arc::default()));},
+
+			OpCode::BinaryOperation {first_operand, second_operand, destination, operation: BinaryOperation::LessThanOrEqual, ..} => {
+				let first = local.get(&Value::String(first_operand.to_string().into_boxed_str()));
+				let second = local.get(&Value::String(second_operand.to_string().into_boxed_str()));
+
+				let result = match (first, second) {
+					(Some(Value::Integer(first)), Some(Value::Integer(second))) => first <= second,
+					_ => todo!()
+				};
+
+				local.insert(Value::String(destination.to_string().into_boxed_str()), Value::Boolean(result));
+			},
+			// OpCode::BinaryOperation
+			// OpCode::UnaryOperation
+			OpCode::Jump {operation, r#if: None} => {
+				index = operation as usize;
+				continue;
+			},
+			OpCode::Jump {operation, r#if: Some(check)} => {
+				let check = local.get(&Value::String(check.to_string().into_boxed_str()));
+				match check {
+					Some(Value::Boolean(true)) => {
+						index = operation as usize;
+						continue;
+					},
+					Some(Value::Boolean(false)) => (),
+					_ => todo!()
+				}
+			},
+			OpCode::Return {result} => break Ok(Some(local.remove(&Value::String(result.to_string().into_boxed_str())).unwrap())),
+			_ => todo!()
+		}
+
+		index = index + 1;
+		if index == function.opcodes.len() {return Ok(None)}
+	}
+}
+
 /// The operation codes used within the lua virtual machine. All lua code is
 /// compiled to blocks of opcodes. Opcodes are the primitive block of "action"
 /// (lua code ran from this vm cannot perform any actions more specific than
@@ -139,27 +271,33 @@ pub enum UnaryOperation {
 	Not
 }
 
-#[derive(Debug)]
-pub struct Function {
-	constants: Vec<Value>,
-	opcodes: Vec<OpCode<'static>>
-}
-
-#[derive(Debug)]
-pub struct Table(pub Mutex<HashMap<Value, Value>>);
-
-use std::{collections::HashMap, sync::{Arc, Mutex}};
-
+/// Represents a lua value.
+// TODO: Add floats.
 #[derive(Debug, Clone)]
-#[warn(clippy::large_enum_variant)]
 pub enum Value {
 	Integer(i64),
-	//Float(f64),
 	String(Box<str>),
 	Boolean(bool),
-	Function(Arc<Function>),
 	Table(Arc<Table>),
+	Function(Arc<Function>),
 	NativeFunction(fn(Arc<Table>) -> Arc<Table>)
+}
+
+impl Value {
+	fn identifier(identifier: impl AsRef<str>) -> Self {
+		Self::String(identifier.as_ref().to_owned().into_boxed_str())
+	}
+
+	fn type_name(value: Option<&Value>) -> &'static str {
+		match value {
+			None => "nil",
+			Some(Self::Integer(_)) => "number",
+			Some(Self::String(_)) => "string",
+			Some(Self::Boolean(_)) => "boolean",
+			Some(Self::Table(_)) => "table",
+			Some(Self::Function(_) | Self::NativeFunction(_)) => "function"
+		}
+	}
 }
 
 impl Eq for Value {}
@@ -170,16 +308,19 @@ impl PartialEq for Value {
 			(Self::Integer(a), Self::Integer(b)) => *a == *b,
 			(Self::String(a), Self::String(b)) => *a == *b,
 			(Self::Boolean(a), Self::Boolean(b)) => *a == *b,
-			(Self::Function(a), Self::Function(b)) => Arc::as_ptr(a) == Arc::as_ptr(b),
-			(Self::Table(a), Self::Table(b)) => Arc::as_ptr(a) == Arc::as_ptr(b),
+			(Self::Function(a), Self::Function(b)) =>
+				Arc::as_ptr(a) == Arc::as_ptr(b),
+			(Self::Table(a), Self::Table(b)) =>
+				Arc::as_ptr(a) == Arc::as_ptr(b),
 			(Self::NativeFunction(a), Self::NativeFunction(b)) => a == b,
 			_ => false
 		}
 	}
 }
 
-impl std::hash::Hash for Value {
-	fn hash<H>(&self, state: &mut H) where H: std::hash::Hasher {
+impl Hash for Value {
+	fn hash<H>(&self, state: &mut H)
+			where H: Hasher {
 		match self {
 			Self::Integer(integer) => integer.hash(state),
 			Self::String(string) => string.hash(state),
@@ -191,110 +332,27 @@ impl std::hash::Hash for Value {
 	}
 }
 
-//struct Stack {
-	//stack: HashMap<
-//}
-
-/// Executes a function.
-pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
-		mut global: HashMap<Value, Value>) -> Option<Value> {
-	let mut index = 0; // The current opcode we're evaluating.
-	// current_opcode
-
-	loop {
-		match function.opcodes[index] {
-			OpCode::Call {arguments, function, ..} => {
-				let func = local.get(&Value::String(function.to_string().into_boxed_str()));
-				let args = local.get(&Value::String(arguments.to_string().into_boxed_str()));
-
-				let args = match args {
-					Some(Value::Table(table)) => table,
-					_ => todo!()
-				};
-
-				match func {
-					Some(Value::NativeFunction(func)) => {
-						func(args.clone());
-					},
-					Some(Value::Function(_)) => todo!(),
-					_ => todo!()
-				}
-
-				// TODO: Fn stuff blah.
-			},
-			OpCode::IndexRead {indexee, index, destination, ..} => {
-				let indexee = Value::String(indexee.to_string().into_boxed_str());
-				let index = Value::String(index.to_string().into_boxed_str());
-				let destination = Value::String(destination.to_string().into_boxed_str());
-
-				let indexee = local.get(&indexee);
-				let index = local.get(&index);
-
-				match indexee {
-					Some(Value::Table(table)) => {
-						let table = table.0.lock().unwrap();
-						let value = table.get(index.unwrap()).unwrap().clone();
-						drop(table);
-						local.insert(destination, value);
-					},
-					_ => todo!()
-				}
-			},
-			OpCode::IndexWrite {indexee, index, value} => {
-				let indexee = Value::String(indexee.to_string().into_boxed_str());
-				let index = Value::String(index.to_string().into_boxed_str());
-				let value = Value::String(value.to_string().into_boxed_str());
-
-				let indexee = local.get(&indexee);
-				let index = local.get(&index);
-				let value = local.get(&value);
-
-				match indexee {
-					Some(Value::Table(table)) => {
-						table.0.lock().unwrap().insert(index.unwrap().clone(), value.unwrap().clone());
-					},
-					_ => todo!()
-				}
-			},
-			OpCode::Load {constant, destination, ..} => {
-				local.insert(Value::String(destination.to_string().into_boxed_str()), function.constants.get(constant as usize).unwrap().clone());
-			},
-			OpCode::Create {destination, ..} => {
-				local.insert(Value::String(destination.to_string().into_boxed_str()), Value::Table(Arc::new(Table(Mutex::new(HashMap::new())))));
-			},
-			OpCode::BinaryOperation {first_operand, second_operand, destination, operation: BinaryOperation::LessThanOrEqual, ..} => {
-				let first = local.get(&Value::String(first_operand.to_string().into_boxed_str()));
-				let second = local.get(&Value::String(second_operand.to_string().into_boxed_str()));
-
-				let result = match (first, second) {
-					(Some(Value::Integer(first)), Some(Value::Integer(second))) => first <= second,
-					_ => todo!()
-				};
-
-				local.insert(Value::String(destination.to_string().into_boxed_str()), Value::Boolean(result));
-			},
-			// OpCode::BinaryOperation
-			// OpCode::UnaryOperation
-			OpCode::Jump {operation, r#if: None} => {
-				index = operation as usize;
-				continue;
-			},
-			OpCode::Jump {operation, r#if: Some(check)} => {
-				let check = local.get(&Value::String(check.to_string().into_boxed_str()));
-				match check {
-					Some(Value::Boolean(true)) => {
-						index = operation as usize;
-						continue;
-					},
-					Some(Value::Boolean(false)) => (),
-					_ => todo!()
-				}
-			},
-			OpCode::Return {result} => break Some(local.remove(&Value::String(result.to_string().into_boxed_str())).unwrap()),
-			_ => todo!()
+impl Display for Value {
+	fn fmt(&self, f: &mut Formatter<'_>) -> FMTResult {
+		match self {
+			Self::Integer(integer) => write!(f, "{}", integer),
+			Self::String(string) => write!(f, "{}", string),
+			Self::Boolean(boolean) => write!(f, "{}", boolean),
+			Self::Function(function) => write!(f, "function: {:p}", function),
+			Self::Table(table) => write!(f, "table: {:p}", table),
+			Self::NativeFunction(function) => write!(f, "function: {:p}", function),
 		}
-
-		index = index + 1;
-		if index == function.opcodes.len() {return None}
 	}
+}
+
+#[derive(Debug, Default)]
+pub struct Table {
+	pub(crate) data: Mutex<HashMap<Value, Value>>,
+	pub(crate) metatable: Option<Arc<Table>>
+}
+
+#[derive(Debug)]
+pub struct Function {
+	constants: Vec<Value>,
+	opcodes: Vec<OpCode<'static>>
 }

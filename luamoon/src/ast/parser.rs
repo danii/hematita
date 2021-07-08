@@ -16,7 +16,7 @@ pub fn parse(iter: &mut Peekable<impl Iterator<Item = Token>>) -> Block {
 					statements.push(Statement::Call {function, arguments});
 				},
 				actor => {
-					assert_eq!(iter.next(), Some(Token::Assign));
+					assert_eq!(iter.next(), Some(Token::Assign), "{:?}", actor);
 					let value = parse_expression(iter);
 					statements.push(Statement::Assign {actor, value, local: false})
 				}
@@ -78,8 +78,10 @@ pub fn parse_expression(iter: &mut Peekable<impl Iterator<Item = Token>>)
 			Expression::Table()
 		},
 		Token::KeywordFunction => parse_function_expression(iter),
-		a => todo!("{:?}", a)
-		//_ => todo!()
+		Token::LiteralNil => Expression::Nil,
+		Token::LiteralTrue => Expression::True,
+		Token::LiteralFalse => Expression::False,
+		_ => todo!()
 	}
 }
 
@@ -268,6 +270,9 @@ pub enum Expression {
 	String(String),
 	Identifier(String),
 	Table(),
+	Nil,
+	True,
+	False,
 	Call {
 		function: Box<Expression>,
 		arguments: Vec<Expression>

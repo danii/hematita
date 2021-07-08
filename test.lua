@@ -1,1 +1,5 @@
-print("hi", 2, a["b"]);;;;;;;;;; print("A")
+if false then
+  print("SEX")
+end
+
+print("LOL")
