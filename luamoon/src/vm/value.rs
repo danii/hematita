@@ -1,0 +1,233 @@
+pub use self::NillableValue::{Nil, NonNil};
+use self::super::OpCode;
+use std::{
+	array::IntoIter as ArrayIntoIter,
+	borrow::Borrow,
+	collections::HashMap,
+	fmt::{Debug, Display, Formatter, Result as FMTResult},
+	hash::{Hash, Hasher},
+	sync::{Arc, Mutex}
+};
+
+/// Represents a lua value.
+// TODO: Add floats.
+#[derive(Clone)]
+pub enum Value {
+	Integer(i64),
+	String(Box<str>),
+	Boolean(bool),
+	Table(Arc<Table>),
+	Function(Arc<Function>),
+	NativeFunction(fn(Arc<Table>) -> Arc<Table>)
+}
+
+impl Value {
+	pub fn identifier(identifier: impl AsRef<str>) -> Self {
+		Self::String(identifier.as_ref().to_owned().into_boxed_str())
+	}
+
+	pub fn type_name(&self) -> &'static str {
+		match self {
+			Self::Integer(_) => "number",
+			Self::String(_) => "string",
+			Self::Boolean(_) => "boolean",
+			Self::Table(_) => "table",
+			Self::Function(_) | Self::NativeFunction(_) => "function"
+		}
+	}
+}
+
+impl Display for Value {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		match self {
+			Self::Integer(integer) => write!(f, "{}", integer),
+			Self::String(string) => write!(f, "{}", string),
+			Self::Boolean(boolean) => write!(f, "{}", boolean),
+			Self::Table(table) => write!(f, "{}", table),
+			Self::Function(function) => write!(f, "{}", function),
+			Self::NativeFunction(function) => write!(f, "function: {:p}", function)
+		}
+	}
+}
+
+impl Debug for Value {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		match self {
+			Self::Integer(integer) => write!(f, "{:?}", integer),
+			Self::String(string) => write!(f, "{:?}", string),
+			Self::Boolean(boolean) => write!(f, "{:?}", boolean),
+			Self::Table(table) => write!(f, "{:?}", table),
+			Self::Function(function) => write!(f, "{:?}", function),
+			Self::NativeFunction(function) => write!(f, "{:?}", function)
+		}
+	}
+}
+
+impl Eq for Value {}
+
+impl PartialEq for Value {
+	fn eq(&self, other: &Self) -> bool {
+		match (self, other) {
+			(Self::Integer(a), Self::Integer(b)) => *a == *b,
+			(Self::String(a), Self::String(b)) => *a == *b,
+			(Self::Boolean(a), Self::Boolean(b)) => *a == *b,
+			(Self::Function(a), Self::Function(b)) =>
+				Arc::as_ptr(a) == Arc::as_ptr(b),
+			(Self::Table(a), Self::Table(b)) =>
+				Arc::as_ptr(a) == Arc::as_ptr(b),
+			(Self::NativeFunction(a), Self::NativeFunction(b)) => a == b,
+			_ => false
+		}
+	}
+}
+
+impl Hash for Value {
+	fn hash<H>(&self, state: &mut H)
+			where H: Hasher {
+		match self {
+			Self::Integer(integer) => integer.hash(state),
+			Self::String(string) => string.hash(state),
+			Self::Boolean(boolean) => boolean.hash(state),
+			Self::Function(arc) => Arc::as_ptr(arc).hash(state),
+			Self::Table(arc) => Arc::as_ptr(arc).hash(state),
+			Self::NativeFunction(func) => func.hash(state)
+		}
+	}
+}
+
+/// Represents a lua value that may be nil. This type has a lot in common with
+/// the [Option] type, but this type has purpose built methods and trait
+/// implementations for handling lua nil values. Unlike option, NillableValue
+/// can only hold [Value]s or references to them.
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub enum NillableValue<V>
+		where V: Borrow<Value> {
+	/// Variant for when the value is not nil.
+	NonNil(V),
+	/// Variant for when the value is nil.
+	Nil
+}
+
+impl<V> NillableValue<V>
+		where V: Borrow<Value> {
+	/// Get the human readable name of the type of this value.
+	pub fn type_name(&self) -> &'static str {
+		match self {
+			NonNil(value) => value.borrow().type_name(),
+			Nil => "nil"
+		}
+	}
+
+	/// Obtains the inner value by value, by cloning it.
+	pub fn cloned(&self) -> NillableValue<Value> {
+		match self {
+			NonNil(value) => NonNil(value.borrow().clone()),
+			Nil => Nil
+		}
+	}
+
+	/// Convenience method for using [Into::into] or [From::from].
+	pub fn option(self) -> Option<V> {
+		self.into()
+	}
+}
+
+impl<V> Display for NillableValue<V>
+		where V: Borrow<Value> {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		match self {
+			NillableValue::NonNil(value) => write!(f, "{}", value.borrow()),
+			Nil => write!(f, "nil")
+		}
+	}
+}
+
+impl<V> Debug for NillableValue<V>
+		where V: Borrow<Value> {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		match self {
+			NillableValue::NonNil(value) => write!(f, "{:?}", value.borrow()),
+			Nil => write!(f, "nil")
+		}
+	}
+}
+
+impl<V> Default for NillableValue<V>
+		where V: Borrow<Value> {
+	fn default() -> Self {
+		Nil
+	}
+}
+
+impl<V> From<Option<V>> for NillableValue<V>
+		where V: Borrow<Value> {
+	fn from(option: Option<V>) -> Self {
+		match option {
+			Some(value) => NonNil(value),
+			None => Nil
+		}
+	}
+}
+
+impl<V> From<NillableValue<V>> for Option<V>
+		where V: Borrow<Value> {
+	fn from(nillable: NillableValue<V>) -> Self {
+		match nillable {
+			NonNil(value) => Some(value),
+			Nil => None
+		}
+	}
+}
+
+pub trait IntoNillableValue<V>: Sized
+		where V: Borrow<Value> {
+	fn nillable(self) -> NillableValue<V>;
+}
+
+impl<T, V> IntoNillableValue<V> for T
+		where T: Into<NillableValue<V>>, V: Borrow<Value> {
+	fn nillable(self) -> NillableValue<V> {
+		self.into()
+	}
+}
+
+#[derive(Debug, Default)]
+pub struct Table {
+	pub data: Mutex<HashMap<Value, Value>>,
+	pub metatable: Option<Arc<Table>>
+}
+
+impl Table {
+	pub fn arc(self) -> Arc<Self> {
+		Arc::new(self)
+	}
+
+	pub fn array<V, const N: usize>(data: [NillableValue<V>; N]) -> Self
+			where V: Borrow<Value> {
+		let data = Mutex::new(ArrayIntoIter::new(data)
+			.map(|value| NillableValue::cloned(&value))
+			.map(NillableValue::option).enumerate()
+			.map(|(index, value)| (Value::Integer(index as i64), value))
+			.filter_map(|(index, value)| value.map(|value| (index, value)))
+			.collect::<HashMap<_, _>>());
+		Table {data, ..Default::default()}
+	}
+}
+
+impl Display for Table {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		write!(f, "table: {:p}", &self)
+	}
+}
+
+#[derive(Debug)]
+pub struct Function {
+	pub constants: Vec<Value>,
+	pub opcodes: Vec<OpCode<'static>>
+}
+
+impl Display for Function {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		write!(f, "function: {:p}", &self)
+	}
+}

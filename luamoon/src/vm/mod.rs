@@ -1,11 +1,10 @@
 pub mod bytecode;
+pub mod value;
 
-use std::{
-	collections::HashMap,
-	fmt::{Display, Formatter, Result as FMTResult},
-	hash::{Hash, Hasher},
-	sync::{Arc, Mutex}
-};
+use self::value::{Function, IntoNillableValue, Nil, NonNil, Table, Value};
+use if_chain::if_chain;
+use maplit::hashmap;
+use std::{collections::HashMap, sync::Arc};
 
 /// Executes a function.
 pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
@@ -16,31 +15,30 @@ pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
 	loop {
 		match function.opcodes[index] {
 			OpCode::Call {arguments, function, ..} => {
-				let args = match local.get(&Value::identifier(arguments)) {
-					Some(Value::Table(table)) => table,
+				let args = match local.get(&Value::identifier(arguments)).nillable() {
+					NonNil(Value::Table(table)) => table,
 					// args is not a table.
 					args => break Err(format!(
 						"attempt to initiate a function call with a {} value",
-							Value::type_name(args)))
+							args.type_name()))
 				};
 
-				match local.get(&Value::identifier(function)) {
-					Some(Value::NativeFunction(func)) => {
+				match local.get(&Value::identifier(function)).nillable() {
+					NonNil(Value::NativeFunction(func)) => {
 						// TODO: Return...
 						func(args.clone());
 					},
 					// TODO: Fn stuff blah.
-					Some(Value::Function(_)) => todo!(),
+					NonNil(Value::Function(_)) => todo!(),
 					// func is not a function.
-					func => break Err(format!(
-						"attempt to call a {} value", Value::type_name(func)))
+					func => break Err(format!("attempt to call a {} value", func.type_name()))
 				}
 			},
 
 			OpCode::IndexRead {indexee, index, destination, ..} =>
-					match local.get(&Value::identifier(indexee)) {
+					match local.get(&Value::identifier(indexee)).nillable() {
 				// indexee is a table.
-				Some(Value::Table(table)) => {
+				NonNil(Value::Table(table)) => {
 					let index = local.get(&Value::identifier(index))
 						.ok_or("table index is nil".to_owned())?; // table index is nil.
 					let table = table.data.lock().unwrap();
@@ -58,13 +56,13 @@ pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
 				},
 				// indexee is not a table.
 				indexee => break Err(format!(
-					"attempt to index a {} value", Value::type_name(indexee)))
+					"attempt to index a {} value", indexee.type_name()))
 			},
 
 			OpCode::IndexWrite {indexee, index, value} =>
-					match local.get(&Value::identifier(indexee)) {
+					match local.get(&Value::identifier(indexee)).nillable() {
 				// indexee is a table.
-				Some(Value::Table(table)) => {
+				NonNil(Value::Table(table)) => {
 					let mut lock = table.data.lock().unwrap();
 					let index = local.get(&Value::identifier(index))
 						.ok_or("table index is nil".to_owned())?; // index is nil.
@@ -79,25 +77,62 @@ pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
 				},
 				// indexee is not a table.
 				indexee => break Err(format!(
-					"attempt to index a {} value", Value::type_name(indexee)))
+					"attempt to index a {} value", indexee.type_name()))
 			},
 
 			OpCode::Load {constant, destination, ..} =>
-					match function.constants.get(constant as usize) {
+					match function.constants.get(constant as usize).nillable().cloned() {
 				// constant is not nil.
-				Some(constant) =>
-					{local.insert(Value::identifier(destination), constant.clone());},
+				NonNil(constant) =>
+					{local.insert(Value::identifier(destination), constant);},
 				// constant is.... nil?
-				None => {local.remove(&Value::identifier(destination));}
+				Nil => {local.remove(&Value::identifier(destination));}
 			},
 
 			OpCode::Create {destination, ..} =>
 				{local.insert(Value::identifier(destination),
 					Value::Table(Arc::default()));},
 
-			OpCode::BinaryOperation {first_operand, second_operand, destination, operation: BinaryOperation::LessThanOrEqual, ..} => {
-				let first = local.get(&Value::String(first_operand.to_string().into_boxed_str()));
-				let second = local.get(&Value::String(second_operand.to_string().into_boxed_str()));
+			OpCode::BinaryOperation {first, second, destination, operation, ..} => {
+				let first = local.get(&Value::identifier(first)).nillable();
+				let second = local.get(&Value::identifier(second)).nillable();
+
+				todo!();
+				match operation {
+					BinaryOperation::LessThanOrEqual => match (first, second) {
+						(NonNil(Value::Integer(first)), NonNil(Value::Integer(second))) => {
+							Value::Boolean(first >= second);
+						},
+						(NonNil(Value::String(first)), NonNil(Value::String(second))) => {
+							Value::Boolean(first >= second);
+						},
+						(NonNil(Value::Table(metamethod)), second) if {
+								if_chain::if_chain! {
+									if let Some(metamethod) = metamethod.metatable;
+									if let Ok(metamethod) = metamethod.data.lock();
+									if let NonNil(metamethod) =
+										metamethod.get(&Value::identifier("__le")).nillable();
+									then {
+										match metamethod {
+											Value::Function(metamethod) => true,
+											Value::NativeFunction(metamethod) => {
+												metamethod(Table::array([first, second]).arc());
+
+												true
+											},
+											_ => false
+										}
+									} else {false}
+								}
+							} => (),
+						_ => todo!()
+					},
+					_ => todo!()
+				}
+			},
+			/*{
+				let first = local.get(&Value::String(first.to_string().into_boxed_str()));
+				let second = local.get(&Value::String(second.to_string().into_boxed_str()));
 
 				let result = match (first, second) {
 					(Some(Value::Integer(first)), Some(Value::Integer(second))) => first <= second,
@@ -105,8 +140,7 @@ pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
 				};
 
 				local.insert(Value::String(destination.to_string().into_boxed_str()), Value::Boolean(result));
-			},
-			// OpCode::BinaryOperation
+			},*/
 			// OpCode::UnaryOperation
 			OpCode::Jump {operation, r#if: None} => {
 				index = operation as usize;
@@ -229,10 +263,10 @@ pub enum OpCode<'s> {
 	},
 
 	BinaryOperation {
-		first_operand: &'s str,
-		second_operand: &'s str,
+		first: &'s str,
+		second: &'s str,
 		destination: &'s str,
-		destination_local: bool,
+		local: bool,
 		operation: BinaryOperation
 	},
 
@@ -260,99 +294,13 @@ pub enum OpCode<'s> {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum BinaryOperation {
 	LessThan,
 	LessThanOrEqual
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum UnaryOperation {
 	Not
-}
-
-/// Represents a lua value.
-// TODO: Add floats.
-#[derive(Debug, Clone)]
-pub enum Value {
-	Integer(i64),
-	String(Box<str>),
-	Boolean(bool),
-	Table(Arc<Table>),
-	Function(Arc<Function>),
-	NativeFunction(fn(Arc<Table>) -> Arc<Table>)
-}
-
-impl Value {
-	fn identifier(identifier: impl AsRef<str>) -> Self {
-		Self::String(identifier.as_ref().to_owned().into_boxed_str())
-	}
-
-	fn type_name(value: Option<&Value>) -> &'static str {
-		match value {
-			None => "nil",
-			Some(Self::Integer(_)) => "number",
-			Some(Self::String(_)) => "string",
-			Some(Self::Boolean(_)) => "boolean",
-			Some(Self::Table(_)) => "table",
-			Some(Self::Function(_) | Self::NativeFunction(_)) => "function"
-		}
-	}
-}
-
-impl Eq for Value {}
-
-impl PartialEq for Value {
-	fn eq(&self, other: &Self) -> bool {
-		match (self, other) {
-			(Self::Integer(a), Self::Integer(b)) => *a == *b,
-			(Self::String(a), Self::String(b)) => *a == *b,
-			(Self::Boolean(a), Self::Boolean(b)) => *a == *b,
-			(Self::Function(a), Self::Function(b)) =>
-				Arc::as_ptr(a) == Arc::as_ptr(b),
-			(Self::Table(a), Self::Table(b)) =>
-				Arc::as_ptr(a) == Arc::as_ptr(b),
-			(Self::NativeFunction(a), Self::NativeFunction(b)) => a == b,
-			_ => false
-		}
-	}
-}
-
-impl Hash for Value {
-	fn hash<H>(&self, state: &mut H)
-			where H: Hasher {
-		match self {
-			Self::Integer(integer) => integer.hash(state),
-			Self::String(string) => string.hash(state),
-			Self::Boolean(boolean) => boolean.hash(state),
-			Self::Function(arc) => Arc::as_ptr(arc).hash(state),
-			Self::Table(arc) => Arc::as_ptr(arc).hash(state),
-			Self::NativeFunction(func) => func.hash(state)
-		}
-	}
-}
-
-impl Display for Value {
-	fn fmt(&self, f: &mut Formatter<'_>) -> FMTResult {
-		match self {
-			Self::Integer(integer) => write!(f, "{}", integer),
-			Self::String(string) => write!(f, "{}", string),
-			Self::Boolean(boolean) => write!(f, "{}", boolean),
-			Self::Function(function) => write!(f, "function: {:p}", function),
-			Self::Table(table) => write!(f, "table: {:p}", table),
-			Self::NativeFunction(function) => write!(f, "function: {:p}", function),
-		}
-	}
-}
-
-#[derive(Debug, Default)]
-pub struct Table {
-	pub(crate) data: Mutex<HashMap<Value, Value>>,
-	pub(crate) metatable: Option<Arc<Table>>
-}
-
-#[derive(Debug)]
-pub struct Function {
-	constants: Vec<Value>,
-	opcodes: Vec<OpCode<'static>>
 }

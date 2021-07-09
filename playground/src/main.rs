@@ -1,4 +1,4 @@
-use luamoon::{ast::{lexer::Lexer, parser::parse}, lua_lib::print, vm::{Table, Value, bytecode::generate_bytecode, execute}};
+use luamoon::{ast::{lexer::Lexer, parser::parse}, lua_lib::print, vm::{value::{Table, Value}, bytecode::generate_bytecode, execute}};
 use std::{fs::File, io::Read, sync::{Arc, Mutex}};
 
 fn main() {
@@ -13,10 +13,10 @@ fn main() {
 		Value::String("print".to_owned().into_boxed_str()) =>
 			Value::NativeFunction(print),
 		Value::String("a".to_owned().into_boxed_str()) =>
-			Value::Table(Arc::new(Table(Mutex::new(maplit::hashmap! {
+			Value::Table(Arc::new(Table {data: Mutex::new(maplit::hashmap! {
 				Value::String("b".to_owned().into_boxed_str()) =>
 					Value::Integer(10)
-			}))))
+			}), metatable: None}))
 	};
 
 	println!("{:#?}", function);

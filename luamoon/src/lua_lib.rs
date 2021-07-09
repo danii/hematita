@@ -1,4 +1,4 @@
-use self::super::vm::{Table, Value};
+use self::super::vm::value::{Table, Value};
 use std::{collections::HashMap, iter::once, sync::{Arc, Mutex}};
 
 pub fn table_to_vector(table: &Table) -> Vec<Option<Value>> {
