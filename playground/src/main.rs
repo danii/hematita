@@ -1,30 +1,56 @@
-use luamoon::{ast::{lexer::Lexer, parser::{TokenIterator, parse}}, lua_lib::print, vm::{value::{Table, Value}, bytecode::generate_bytecode, execute}};
-use std::{fs::File, io::Read, sync::{Arc, Mutex}};
+use luamoon::{ast::{lexer::Lexer, parser::{TokenIterator, parse}}, lua_lib::print, vm::{value::Value, bytecode::generate_bytecode, execute}};
+use maplit::hashmap;
+use std::{env::args, fs::File, io::Read};
 
 fn main() {
+	let args = args().collect::<Vec<_>>();
+
 	let mut code = String::new();
-	File::open("test.lua").unwrap().read_to_string(&mut code).unwrap();
+	File::open(&args[2]).unwrap().read_to_string(&mut code).unwrap();
 
-	let tokens = Lexer {source: code.chars().peekable()};
-	let block = parse(&mut TokenIterator(tokens.peekable()));
+	match &args[1] as &str {
+		"lex" => {
+			let tokens = Lexer {source: code.chars().peekable()};
 
-	let block = match block {
-		Ok(block) => block,
-		Err(error) => panic!("{:?}", error)
-	};
+			println!("{:#?}", tokens.collect::<Vec<_>>());
+		},
+		"parse" => {
+			let tokens = Lexer {source: code.chars().peekable()};
+			let block = parse(&mut TokenIterator(tokens.peekable()));
 
-	let function = generate_bytecode(block);
-	let local = maplit::hashmap! {
-		Value::String("print".to_owned().into_boxed_str()) =>
-			Value::NativeFunction(print),
-		Value::String("a".to_owned().into_boxed_str()) =>
-			Value::Table(Arc::new(Table {data: Mutex::new(maplit::hashmap! {
-				Value::String("b".to_owned().into_boxed_str()) =>
-					Value::Integer(10)
-			}), metatable: None}))
-	};
+			match block {
+				Ok(block) => println!("{:#?}", block),
+				Err(error) => println!("SYNTAX ERROR: {}", error)
+			}
+		},
+		"compile" => {
+			let tokens = Lexer {source: code.chars().peekable()};
+			let block = parse(&mut TokenIterator(tokens.peekable()));
+			let function = match block {
+				Ok(block) => generate_bytecode(block),
+				Err(error) => return println!("SYNTAX ERROR: {}", error)
+			};
 
-	execute(&Arc::new(function), local, &mut maplit::hashmap! {}).unwrap();
+			println!("{:#?}", function)
+		},
+		"run" => {
+			let tokens = Lexer {source: code.chars().peekable()};
+			let block = parse(&mut TokenIterator(tokens.peekable()));
+			let function = match block {
+				Ok(block) => generate_bytecode(block),
+				Err(error) => return println!("SYNTAX ERROR: {}", error)
+			};
 
-	//println!("{:?}", lexer.collect::<Vec<_>>());
+			let locals = hashmap! {
+				Value::String("print".to_owned().into_boxed_str()) =>
+					Value::NativeFunction(print),
+			};
+
+			match execute(&function, locals, &mut hashmap! {}) {
+				Ok(_) => (),
+				Err(error) =>println!("ERROR: {}", error)
+			}
+		},
+		_ => println!("unknown verb")
+	}
 }
