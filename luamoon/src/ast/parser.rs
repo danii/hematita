@@ -1,248 +1,326 @@
-//use self::super::{OpCode, Value, Function};
+use itertools::Itertools;
+
 use self::super::lexer::Token;
-use std::{fmt::{Display, Formatter, Result as FMTResult}, iter::Peekable};
+use std::{fmt::{Display, Formatter, Result as FMTResult}, iter::{Peekable, from_fn}};
+
+macro_rules! expect {
+	($value:expr, $type:pat) => {
+		let value = $value;
+		if !matches!(value, Some($type)) {return Err(Error(value))}
+	}
+}
+
+macro_rules! iter_expect {
+	($value:expr, $type:pat) => {
+		let value = $value;
+		if !matches!(value, Some($type)) {return Some(Err(Error(value)))}
+	}
+}
+
+macro_rules! iter_throw {
+	($value:expr) => {
+		match $value {
+			Ok(value) => value,
+			Err(error) => return Some(Err(error))
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct Error(Option<Token>);
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+pub struct TokenIterator<I>(pub Peekable<I>)
+	where I: Iterator<Item = Token>;
+
+impl<I> TokenIterator<I>
+		where I: Iterator<Item = Token> {
+	// Eats a token, disposing of it.
+	fn eat(&mut self) {
+		self.next();
+	}
+
+	/// Returns the next token, if any.
+	fn next(&mut self) -> Option<Token> {
+		self.0.next()
+	}
+
+	/// Eats a token, then returns the next one, if any.
+	fn eat_next(&mut self) -> Option<Token> {
+		self.eat();
+		self.next()
+	}
+
+	/// Eats a token, then peeks the next one, if any.
+	fn eat_peek(&mut self) -> Option<&Token> {
+		self.eat();
+		self.peek()
+	}
+
+	/// Returns the next token, assuming it's an identifier.
+	fn identifier(&mut self) -> String {
+		match self.next() {
+			Some(Token::Identifier(identifier)) => identifier,
+			_ => unreachable!()
+		}
+	}
+
+	/// Returns the next token, assuming it's a string.
+	fn string(&mut self) -> String {
+		match self.next() {
+			Some(Token::String(string)) => string,
+			_ => unreachable!()
+		}
+	}
+
+	/// Returns the next token, assuming it's an integer.
+	fn integer(&mut self) -> i64 {
+		match self.next() {
+			Some(Token::Integer(integer)) => integer,
+			_ => unreachable!()
+		}
+	}
+
+	/// Peeks the next token, if any.
+	fn peek(&mut self) -> Option<&Token> {
+		self.0.peek()
+	}
+}
 
 /// Parses a block of lua tokens.
-pub fn parse(iter: &mut Peekable<impl Iterator<Item = Token>>) -> Block {
+pub fn parse(iter: &mut TokenIterator<impl Iterator<Item = Token>>) -> Result<Block> {
 	let mut statements = Vec::new();
 
 	loop {
 		match iter.peek() {
-			Some(Token::SemiColon) => {iter.next();},
+			// ;
+			Some(Token::SemiColon) => iter.eat(),
 
-			Some(Token::Identifier(_)) => match parse_expression(iter) {
-				Expression::Call {function, arguments} => {
-					let function = *function;
-					statements.push(Statement::Call {function, arguments});
-				},
+			// actor
+			Some(Token::Identifier(_)) => match parse_expression(iter)? {
+				// actor()
+				Expression::Call {function, arguments} =>
+					statements.push(Statement::Call {function: *function, arguments}),
+
+				// actor = value
 				actor => {
-					assert_eq!(iter.next(), Some(Token::Assign), "{:?}", actor);
-					let value = parse_expression(iter);
+					expect!(iter.next(), Token::Assign);
+					let value = parse_expression(iter)?;
 					statements.push(Statement::Assign {actor, value, local: false})
 				}
 			},
 
-			Some(Token::KeywordLocal) => match {iter.next(); iter.peek().unwrap()} {
-				Token::Identifier(actor) => {
-					let actor = Expression::Identifier(actor.clone()); // TIDY
-					iter.next();
-					assert_eq!(iter.next(), Some(Token::Assign));
-					let value = parse_expression(iter);
+			// local
+			Some(Token::KeywordLocal) => match iter.eat_next() {
+				// local actor = value
+				Some(Token::Identifier(actor)) => {
+					let actor = Expression::Identifier(actor);
+					expect!(iter.next(), Token::Assign);
+					let value = parse_expression(iter)?;
 					statements.push(Statement::Assign {actor, value, local: true})
 				},
-				Token::KeywordFunction =>
-					statements.push(parse_function_statement(iter, true)),
-				_ => todo!()
+
+				// local function actor()
+				Some(Token::KeywordFunction) => {
+					let (name, arguments, body) = parse_function(iter, true)?;
+					let (name, local) = (name.unwrap(), true);
+					statements.push(Statement::Function {name, arguments, body, local})
+				},
+
+				token => break Err(Error(token))
 			},
 
-			Some(Token::KeywordFunction) =>
-				statements.push(parse_function_statement(iter, false)),
+			// function actor()
+			Some(Token::KeywordFunction) => {
+				let (name, arguments, body) = parse_function(iter, true)?;
+				let (name, local) = (name.unwrap(), false);
+				statements.push(Statement::Function {name, arguments, body, local})
+			},
 
-			Some(Token::KeywordIf) => statements.push(parse_if(iter)),
+			// if actor
+			Some(Token::KeywordIf) => statements.push(parse_if(iter)?),
 
-			_ => break Block(statements)
+			Some(Token::KeywordEnd) | None => break Ok(Block(statements)),
+			Some(_) => break Err(Error(iter.next()))
 		}
 	}
 }
 
-pub fn parse_if(iter: &mut Peekable<impl Iterator<Item = Token>>) -> Statement {
-	assert_eq!(iter.next(), Some(Token::KeywordIf)); // todo!()
-	let condition = parse_expression(iter);
-	assert_eq!(iter.next(), Some(Token::KeywordThen)); // todo!()
-	let then = parse(iter);
-
-	match iter.next().unwrap() {
-		Token::KeywordEnd => {
-			Statement::If {
-				condition,
-				then,
-				else_ifs: Vec::new(),
-				r#else: None
-			}
-		},
-		_ => todo!()
-	}
-}
-
-pub fn parse_expression(iter: &mut Peekable<impl Iterator<Item = Token>>)
-		-> Expression {
-	match iter.next().unwrap() {
-		Token::Identifier(actor) =>
-			parse_inner_expression(iter, Expression::Identifier(actor)),
-		Token::Integer(integer) =>
-			parse_inner_expression(iter, Expression::Integer(integer)),
-		Token::String(string) =>
-			parse_inner_expression(iter, Expression::String(string)),
-		Token::OpenCurly => {
-			assert_eq!(iter.next(), Some(Token::CloseCurly));
-			Expression::Table()
-		},
-		Token::KeywordFunction => parse_function_expression(iter),
-		Token::LiteralNil => Expression::Nil,
-		Token::LiteralTrue => Expression::True,
-		Token::LiteralFalse => Expression::False,
-		_ => todo!()
-	}
-}
-
-pub fn parse_inner_expression(iter: &mut Peekable<impl Iterator<Item = Token>>,
-		actor: Expression) -> Expression {
+pub fn parse_expression(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
+		-> Result<Expression> {
 	match iter.peek() {
-		// actor.
-		Some(Token::Period) => match {iter.next(); iter.next().unwrap()} {
-			// actor.identifier
-			Token::Identifier(index) => {
-				let expression = Expression::Index {
-					indexee: Box::new(actor),
-					index: Box::new(Expression::String(index))
-				};
-
-				parse_inner_expression(iter, expression)
-			},
-			_ => todo!()
+		// Literals
+		Some(Token::Identifier(_)) => {
+			let identifier = iter.identifier();
+			parse_inner_expression(iter, Expression::Identifier(identifier))
+		},
+		Some(Token::Integer(_)) => {
+			let integer = iter.integer();
+			parse_inner_expression(iter, Expression::Integer(integer))
+		},
+		Some(Token::String(_)) => {
+			let string = iter.string();
+			parse_inner_expression(iter, Expression::String(string))
 		},
 
+		// Function Call
+		Some(Token::OpenCurly) => {
+			iter.eat();
+			assert_eq!(iter.next(), Some(Token::CloseCurly));
+			Ok(Expression::Table())
+		},
+		Some(Token::KeywordFunction) => {
+			let (_, arguments, body) = parse_function(iter, false)?;
+			Ok(Expression::Function {arguments, body})
+		},
+		Some(Token::LiteralNil) => Ok(Expression::Nil),
+		Some(Token::LiteralTrue) => Ok(Expression::True),
+		Some(Token::LiteralFalse) => Ok(Expression::False),
+		_ => Err(Error(iter.next()))
+	}
+}
+
+pub fn parse_inner_expression(iter: &mut TokenIterator<impl Iterator<Item = Token>>,
+		actor: Expression) -> Result<Expression> {
+	match iter.peek() {
 		// actor <binary operation>
-		Some(Token::Equal | Token::NotEqual |
-				Token::LessThan | Token::LessThanOrEqual |
-				Token::GreaterThan | Token::GreaterThanOrEqual |
-				Token::Add | Token::Subtract) => {
-			Expression::BinaryOperation {
-				left: Box::new(actor),
-				operator: match iter.next().unwrap() {
-					Token::Equal => BinaryOperator::Equal,
-					Token::NotEqual => BinaryOperator::NotEqual,
-					Token::LessThan => BinaryOperator::LessThan,
-					Token::LessThanOrEqual => BinaryOperator::LessThanOrEqual,
-					Token::GreaterThan => BinaryOperator::GreaterThan,
-					Token::GreaterThanOrEqual => BinaryOperator::GreaterThanOrEqual,
-					Token::Add => BinaryOperator::Add,
-					_ => unreachable!()
-				},
-				right: Box::new(parse_expression(iter))
-			}
-		},
+		Some(Token::Equal | Token::NotEqual | Token::LessThan
+				| Token::LessThanOrEqual | Token::GreaterThan
+				| Token::GreaterThanOrEqual | Token::Add | Token::Subtract) =>
+					Ok(Expression::BinaryOperation {
+			left: Box::new(actor),
+			operator: match iter.next().unwrap() {
+				Token::Equal => BinaryOperator::Equal,
+				Token::NotEqual => BinaryOperator::NotEqual,
+				Token::LessThan => BinaryOperator::LessThan,
+				Token::LessThanOrEqual => BinaryOperator::LessThanOrEqual,
+				Token::GreaterThan => BinaryOperator::GreaterThan,
+				Token::GreaterThanOrEqual => BinaryOperator::GreaterThanOrEqual,
+				Token::Add => BinaryOperator::Add,
+				_ => unreachable!()
+			},
+			right: Box::new(parse_expression(iter)?)
+		}),
 
 		// actor()
 		Some(Token::OpenParen) => {
-			iter.next();
+			let mut first = true;
+			let arguments = from_fn(|| match iter.peek() {
+				Some(Token::OpenParen) if first => {
+					iter.eat(); first = false;
+					if let Some(Token::CloseParen) = iter.peek()
+						{iter.eat(); return None}
+					Some(parse_expression(iter))
+				},
+				Some(Token::Comma) => {iter.eat(); Some(parse_expression(iter))},
+				Some(Token::CloseParen) => {iter.eat(); None},
+				_ => Some(Err(Error(iter.next())))
+			}).try_collect()?;
 
-			let mut arguments = Vec::new();
-
-			if let Some(Token::CloseParen) = iter.peek() {
-				iter.next();
-			} else {
-				loop {
-					arguments.push(parse_expression(iter));
-					match iter.peek().unwrap() {
-						Token::Comma => {iter.next();},
-						Token::CloseParen => {iter.next(); break}
-						_ => todo!()
-					}
-				}
-			}
-
-			let expression = Expression::Call {
+			parse_inner_expression(iter, Expression::Call {
 				function: Box::new(actor),
 				arguments
-			};
-			parse_inner_expression(iter, expression)
+			})
+		},
+
+		// actor.
+		Some(Token::Period) => match iter.eat_peek() {
+			// actor.identifier
+			Some(Token::Identifier(_)) => {
+				let index = Box::new(Expression::String(iter.identifier()));
+				parse_inner_expression(iter, Expression::Index {
+					index, indexee: Box::new(actor)
+				})
+			},
+
+			// No other token but an identifier is expected here.
+			_ => Err(Error(iter.next()))
 		},
 
 		// actor[]
 		Some(Token::OpenBracket) => {
-			iter.next();
-			let expression = Expression::Index {
-				indexee: Box::new(actor),
-				index: Box::new(parse_expression(iter))
-			};
+			iter.eat();
 
-			let result = parse_inner_expression(iter, expression);
-			assert_eq!(iter.next(), Some(Token::CloseBracket));
-			parse_inner_expression(iter, result)
+			let index = Box::new(parse_expression(iter)?);
+			let result = parse_inner_expression(iter, Expression::Index {
+				index, indexee: Box::new(actor)
+			})?;
+			match iter.next() {
+				Some(Token::CloseBracket) => parse_inner_expression(iter, result),
+				token => Err(Error(token))
+			}
 		},
 
-		_ => actor
+		_ => Ok(actor)
 	}
 }
 
-pub fn parse_function_statement(iter: &mut Peekable<impl Iterator<Item = Token>>,
-		local: bool) -> Statement {
-	assert_eq!(iter.next(), Some(Token::KeywordFunction));
-	let name = match iter.next().unwrap() {
-		Token::Identifier(name) => name,
-		_ => todo!() // TIDY todo!()
-	};
-	assert_eq!(iter.next(), Some(Token::OpenParen));
+pub fn parse_if(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
+		-> Result<Statement> {
+	expect!(iter.next(), Token::KeywordIf);
+	let condition = parse_expression(iter)?;
+	expect!(iter.next(), Token::KeywordThen);
+	let then = parse(iter)?;
 
-	let mut arguments = Vec::new();
-	if let Some(Token::CloseParen) = iter.peek() {
-		iter.next();
-	} else {
-		loop {
-			let name = iter.next().unwrap();
-			match name {
-				Token::Identifier(name) => arguments.push(name),
-				_ => todo!() // TIDY todo!()
-			}
-
-			match iter.peek().unwrap() {
-				Token::Comma => {iter.next();},
-				Token::CloseParen => {iter.next(); break}
-				_ => todo!()
-			}
-		}
-	}
-
-	let block = parse(iter);
-
-	match iter.next().unwrap() {
-		Token::KeywordEnd => {
-			Statement::Function {
-				name,
-				arguments,
-				body: block,
-				local
-			}
+	let mut r#else = None;
+	let else_ifs = from_fn(|| match iter.next() {
+		Some(Token::KeywordEnd) => None,
+		Some(Token::KeywordElseIf) => {
+			let condition = iter_throw!(parse_expression(iter));
+			iter_expect!(iter.next(), Token::KeywordThen);
+			let then = iter_throw!(parse(iter));
+			Some(Ok(ElseIf {condition, then}))
 		},
-		_ => todo!()
-	}
+		Some(Token::KeywordElse) => {
+			r#else = Some(iter_throw!(parse(iter)));
+			None
+		},
+		token => Some(Err(Error(token)))
+	}).try_collect()?;
+
+	Ok(Statement::If {
+		condition,
+		then,
+		else_ifs,
+		r#else
+	})
 }
 
-pub fn parse_function_expression(iter: &mut Peekable<impl Iterator<Item = Token>>)
-		-> Expression {
-	assert_eq!(iter.next(), Some(Token::OpenParen));
-
-	let mut arguments = Vec::new();
-	if let Some(Token::CloseParen) = iter.peek() {
-		iter.next();
-	} else {
-		loop {
-			let name = iter.next().unwrap();
-			match name {
-				Token::Identifier(name) => arguments.push(name),
-				_ => todo!() // TIDY todo!()
-			}
-
-			match iter.peek().unwrap() {
-				Token::Comma => {iter.next();},
-				Token::CloseParen => {iter.next(); break}
-				_ => todo!()
-			}
+pub fn parse_function(iter: &mut TokenIterator<impl Iterator<Item = Token>>,
+		parse_name: bool) -> Result<(Option<String>, Vec<String>, Block)> {
+	expect!(iter.next(), Token::KeywordFunction);
+	let name = if parse_name {
+		match iter.next() {
+			Some(Token::Identifier(name)) => Some(name),
+			token => return Err(Error(token))
 		}
-	}
+	} else {None};
 
-	let block = parse(iter);
-
-	match iter.next().unwrap() {
-		Token::KeywordEnd => {
-			Expression::Function {
-				arguments,
-				body: block
+	let mut first = true;
+	let arguments = from_fn(|| match iter.peek() {
+		Some(Token::OpenParen) if first => {
+			iter.eat(); first = false;
+			match iter.next() {
+				Some(Token::Identifier(argument)) => Some(Ok(argument)),
+				Some(Token::CloseParen) => None,
+				token => Some(Err(Error(token)))
 			}
 		},
-		_ => todo!()
-	}
+		Some(Token::Comma) => {
+			iter.eat();
+			match iter.next() {
+				Some(Token::Identifier(argument)) => Some(Ok(argument)),
+				token => Some(Err(Error(token)))
+			}
+		},
+		Some(Token::CloseParen) => {iter.eat(); None},
+		_ => Some(Err(Error(iter.next())))
+	}).try_collect()?;
+	let body = parse(iter)?;
+	expect!(iter.next(), Token::KeywordEnd);
+
+	Ok((name, arguments, body))
 }
 
 // TODO: Should we remove [crate::vm::BinaryOperation] and use this instead?

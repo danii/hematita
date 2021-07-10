@@ -27,8 +27,11 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 						// TODO: Return...
 						func(args.clone());
 					},
-					// TODO: Fn stuff blah.
-					NonNil(Value::Function(_)) => todo!(),
+					NonNil(Value::Function(func)) => {
+						// TODO: Make locals and globals tables...
+						// TODO: Return...
+						execute(&**func, args.data.lock().unwrap().clone(), global)?;
+					},
 					// func is not a function.
 					func => break Err(format!("attempt to call a {} value", func.type_name()))
 				}
@@ -86,6 +89,17 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 					{local.insert(Value::new_string(destination), constant);},
 				// constant is.... nil?
 				Nil => {local.remove(&Value::new_string(destination));}
+			},
+
+			OpCode::ReAssign {actor, destination, ..} => {
+				let actor = local.get(&Value::new_string(actor));
+				match local.get(&actor.unwrap()).nillable() {
+					NonNil(value) => {
+						let value = value.clone();
+						local.insert(Value::new_string(destination), value);
+					},
+					Nil => {local.remove(&Value::new_string(destination));}
+				}
 			},
 
 			OpCode::Create {destination, ..} =>
@@ -240,9 +254,7 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 					&Value::new_string(result)).nillable() {
 				NonNil(Value::Table(result)) => break Ok(result.clone()),
 				_ => panic!()
-			},
-
-			_ => todo!()
+			}
 		}
 
 		index = index + 1;

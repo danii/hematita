@@ -181,7 +181,34 @@ impl ByteCodeGenerator {
 					_ => unreachable!()
 				}
 			},
-			_ => todo!()
+			Statement::Function {name, arguments, body, local} => {
+				let mut function = generate_bytecode(body);
+				arguments.into_iter().enumerate().for_each(|(index, arg)| {
+					function.constants.push(Value::Integer(index as i64 + 1));
+
+					function.opcodes.insert(0, OpCode::ReAssign {
+						actor: "(a",
+						destination: Box::leak(arg.into_boxed_str()),
+						destination_local: true
+					});
+
+					function.opcodes.insert(0, OpCode::Load {
+						constant: function.constants.len() as u16 - 1,
+						destination: "(a",
+						destination_local: false
+					});
+				});
+
+
+
+				let constant = self.constant(Value::Function(std::sync::Arc::new(function)));
+				self.push(OpCode::Load {
+					constant,
+					// LEAK
+					destination: Box::leak(name.into_boxed_str()),
+					destination_local: local
+				})
+			}
 		}
 	}
 

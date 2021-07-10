@@ -1,4 +1,4 @@
-use luamoon::{ast::{lexer::Lexer, parser::parse}, lua_lib::print, vm::{value::{Table, Value}, bytecode::generate_bytecode, execute}};
+use luamoon::{ast::{lexer::Lexer, parser::{TokenIterator, parse}}, lua_lib::print, vm::{value::{Table, Value}, bytecode::generate_bytecode, execute}};
 use std::{fs::File, io::Read, sync::{Arc, Mutex}};
 
 fn main() {
@@ -6,7 +6,12 @@ fn main() {
 	File::open("test.lua").unwrap().read_to_string(&mut code).unwrap();
 
 	let tokens = Lexer {source: code.chars().peekable()};
-	let block = parse(&mut tokens.peekable());
+	let block = parse(&mut TokenIterator(tokens.peekable()));
+
+	let block = match block {
+		Ok(block) => block,
+		Err(error) => panic!("{:?}", error)
+	};
 
 	let function = generate_bytecode(block);
 	let local = maplit::hashmap! {
@@ -18,8 +23,6 @@ fn main() {
 					Value::Integer(10)
 			}), metatable: None}))
 	};
-
-	println!("{:#?}", function);
 
 	execute(&Arc::new(function), local, &mut maplit::hashmap! {}).unwrap();
 
