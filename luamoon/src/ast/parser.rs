@@ -29,6 +29,17 @@ macro_rules! iter_throw {
 #[derive(Debug)]
 pub struct Error(Option<Token>);
 
+impl std::error::Error for Error {}
+
+impl Display for Error {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		match &self.0 {
+			Some(token) => write!(f, "unexpected '{}'", token),
+			None => write!(f, "unexpected end of file")
+		}
+	}
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct TokenIterator<I>(pub Peekable<I>)
@@ -44,12 +55,6 @@ impl<I> TokenIterator<I>
 	/// Returns the next token, if any.
 	fn next(&mut self) -> Option<Token> {
 		self.0.next()
-	}
-
-	/// Eats a token, then returns the next one, if any.
-	fn eat_next(&mut self) -> Option<Token> {
-		self.eat();
-		self.next()
 	}
 
 	/// Eats a token, then peeks the next one, if any.
@@ -89,7 +94,8 @@ impl<I> TokenIterator<I>
 }
 
 /// Parses a block of lua tokens.
-pub fn parse(iter: &mut TokenIterator<impl Iterator<Item = Token>>) -> Result<Block> {
+pub fn parse(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
+		-> Result<Block> {
 	let mut statements = Vec::new();
 
 	loop {
@@ -112,10 +118,10 @@ pub fn parse(iter: &mut TokenIterator<impl Iterator<Item = Token>>) -> Result<Bl
 			},
 
 			// local
-			Some(Token::KeywordLocal) => match iter.eat_next() {
+			Some(Token::KeywordLocal) => match iter.eat_peek() {
 				// local actor = value
-				Some(Token::Identifier(actor)) => {
-					let actor = Expression::Identifier(actor);
+				Some(Token::Identifier(_)) => {
+					let actor = Expression::Identifier(iter.identifier());
 					expect!(iter.next(), Token::Assign);
 					let value = parse_expression(iter)?;
 					statements.push(Statement::Assign {actor, value, local: true})
@@ -128,7 +134,7 @@ pub fn parse(iter: &mut TokenIterator<impl Iterator<Item = Token>>) -> Result<Bl
 					statements.push(Statement::Function {name, arguments, body, local})
 				},
 
-				token => break Err(Error(token))
+				_ => break Err(Error(iter.next()))
 			},
 
 			// function actor()
@@ -174,9 +180,9 @@ pub fn parse_expression(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 			let (_, arguments, body) = parse_function(iter, false)?;
 			Ok(Expression::Function {arguments, body})
 		},
-		Some(Token::LiteralNil) => Ok(Expression::Nil),
-		Some(Token::LiteralTrue) => Ok(Expression::True),
-		Some(Token::LiteralFalse) => Ok(Expression::False),
+		Some(Token::LiteralNil) => {iter.eat(); Ok(Expression::Nil)},
+		Some(Token::LiteralTrue) => {iter.eat(); Ok(Expression::True)},
+		Some(Token::LiteralFalse) => {iter.eat(); Ok(Expression::False)},
 		_ => Err(Error(iter.next()))
 	}
 }

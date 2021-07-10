@@ -66,6 +66,7 @@ impl ByteCodeGenerator {
 					destination_local: true
 				});
 
+				// TODO: Why do tables need length?
 				{
 					let (index, index_tmp) = self.temporary();
 					let (value, value_tmp) = self.temporary();
@@ -129,11 +130,21 @@ impl ByteCodeGenerator {
 					let (value, _) = self.generate_expression(value, Some(identifier));
 
 					match value {
-						Some(value) => self.push(OpCode::ReAssign {
-							actor: value,
-							destination: identifier,
-							destination_local: local
-						}),
+						Some(value) => {
+							let (tmp, tmpid) = self.temporary();
+							let constant = self.constant(Value::new_string(value));
+							self.push(OpCode::Load {
+								constant,
+								destination: tmp,
+								destination_local: true
+							});
+							self.push(OpCode::ReAssign {
+								actor: tmp,
+								destination: identifier,
+								destination_local: local
+							});
+							self.temporary_free(tmpid)
+						},
 						None => ()
 					}
 				},
@@ -198,8 +209,6 @@ impl ByteCodeGenerator {
 						destination_local: false
 					});
 				});
-
-
 
 				let constant = self.constant(Value::Function(std::sync::Arc::new(function)));
 				self.push(OpCode::Load {

@@ -231,3 +231,58 @@ pub enum Token {
 	KeywordUntil,
 	KeywordWhile
 }
+
+impl std::fmt::Display for Token {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			// Literals
+			Self::Identifier(identifier) => write!(f, "{}", identifier),
+			Self::Integer(integer) => write!(f, "{}", integer),
+			Self::String(string) => write!(f, "{:?}", string),
+
+			// Punctuation
+			Self::Assign => write!(f, "="),
+			Self::Colon => write!(f, ":"),
+			Self::Comma => write!(f, ","),
+			Self::Period => write!(f, "."),
+			Self::SemiColon => write!(f, ";"),
+			Self::Equal => write!(f, "=="),
+			Self::NotEqual => write!(f, "~="),
+			Self::LessThan => write!(f, "<"),
+			Self::LessThanOrEqual => write!(f, "<="),
+			Self::GreaterThan => write!(f, ">"),
+			Self::GreaterThanOrEqual => write!(f, ">="),
+			Self::Add => write!(f, "+"),
+			Self::Subtract => write!(f, "-"),
+			Self::Concat => write!(f, ".."),
+			Self::OpenParen => write!(f, "("),
+			Self::CloseParen => write!(f, ")"),
+			Self::OpenCurly => write!(f, "{{"),
+			Self::CloseCurly => write!(f, "}}"),
+			Self::OpenBracket => write!(f, "["),
+			Self::CloseBracket => write!(f, "]"),
+
+			// Literal Values
+			Self::LiteralTrue => write!(f, "true"),
+			Self::LiteralFalse => write!(f, "false"),
+			Self::LiteralNil => write!(f, "nil"),
+
+			// Keywords
+			Self::KeywordBreak => write!(f, "break"),
+			Self::KeywordDo => write!(f, "do"),
+			Self::KeywordElse => write!(f, "else"),
+			Self::KeywordElseIf => write!(f, "elseif"),
+			Self::KeywordEnd => write!(f, "end"),
+			Self::KeywordFor => write!(f, "for"),
+			Self::KeywordFunction => write!(f, "function"),
+			Self::KeywordGoto => write!(f, "goto"),
+			Self::KeywordIf => write!(f, "if"),
+			Self::KeywordIn => write!(f, "in"),
+			Self::KeywordLocal => write!(f, "local"),
+			Self::KeywordRepeat => write!(f, "repeat"),
+			Self::KeywordThen => write!(f, "then"),
+			Self::KeywordUntil => write!(f, "until"),
+			Self::KeywordWhile => write!(f, "while")
+		}
+	}
+}

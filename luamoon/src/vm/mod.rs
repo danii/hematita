@@ -12,6 +12,8 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 	// current_opcode
 
 	loop {
+		if index == function.opcodes.len() {break Ok(Table::default().arc())}
+
 		match function.opcodes[index] {
 			OpCode::Call {arguments, function, ..} => {
 				let args = match local.get(&Value::new_string(arguments)).nillable() {
@@ -258,7 +260,6 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 		}
 
 		index = index + 1;
-		if index == function.opcodes.len() {break Ok(Table::default().arc())}
 	}
 }
 
