@@ -22,8 +22,8 @@ pub enum Value {
 }
 
 impl Value {
-	pub fn identifier(identifier: impl AsRef<str>) -> Self {
-		Self::String(identifier.as_ref().to_owned().into_boxed_str())
+	pub fn new_string(string: impl AsRef<str>) -> Self {
+		Self::String(string.as_ref().to_owned().into_boxed_str())
 	}
 
 	pub fn type_name(&self) -> &'static str {
@@ -33,6 +33,56 @@ impl Value {
 			Self::Boolean(_) => "boolean",
 			Self::Table(_) => "table",
 			Self::Function(_) | Self::NativeFunction(_) => "function"
+		}
+	}
+
+	/// Coerces this value to a bool. The rules are as follows; If the value is
+	/// not a boolean, then true is returned, otherwise the value of the bool
+	/// is returned.
+	pub fn coerce_to_bool(&self) -> bool {
+		match self {
+			Self::Boolean(value) => *value,
+			_ => true
+		}
+	}
+
+	/// Like [coerce_to_bool], but wraps the result in a value.
+	pub fn coerce_to_boolean(&self) -> Value {
+		Value::Boolean(self.coerce_to_bool())
+	}
+
+	pub fn integer(&self) -> Option<i64> {
+		match self {
+			Self::Integer(integer) => Some(*integer),
+			_ => None
+		}
+	}
+
+	pub fn string(&self) -> Option<&str> {
+		match self {
+			Self::String(string) => Some(string),
+			_ => None
+		}
+	}
+
+	pub fn boolean(&self) -> Option<bool> {
+		match self {
+			Self::Boolean(boolean) => Some(*boolean),
+			_ => None
+		}
+	}
+
+	pub fn table(&self) -> Option<&Arc<Table>> {
+		match self {
+			Self::Table(table) => Some(table),
+			_ => None
+		}
+	}
+
+	pub fn function(&self) -> Option<&Arc<Function>> {
+		match self {
+			Self::Function(function) => Some(function),
+			_ => None
 		}
 	}
 }
@@ -95,6 +145,12 @@ impl Hash for Value {
 	}
 }
 
+impl From<i64> for Value {
+	fn from(value: i64) -> Self {
+		Self::Integer(value)
+	}
+}
+
 /// Represents a lua value that may be nil. This type has a lot in common with
 /// the [Option] type, but this type has purpose built methods and trait
 /// implementations for handling lua nil values. Unlike option, NillableValue
@@ -129,6 +185,21 @@ impl<V> NillableValue<V>
 	/// Convenience method for using [Into::into] or [From::from].
 	pub fn option(self) -> Option<V> {
 		self.into()
+	}
+
+	/// Like [Value::coerce_to_bool], but also handles nil cases. The rules are as
+	/// follows; If the value is nil or false, false is returned, otherwise true
+	/// is.
+	pub fn coerce_to_bool(&self) -> bool {
+		match self {
+			NonNil(value) => value.borrow().coerce_to_bool(),
+			Nil => false
+		}
+	}
+
+	/// Like [coerce_to_bool], but wraps the result in a value.
+	pub fn coerce_to_boolean(&self) -> Value {
+		Value::Boolean(self.coerce_to_bool())
 	}
 }
 
@@ -202,15 +273,20 @@ impl Table {
 		Arc::new(self)
 	}
 
-	pub fn array<V, const N: usize>(data: [NillableValue<V>; N]) -> Self
+	pub fn array<V, const N: usize>(data: [&NillableValue<V>; N]) -> Self
 			where V: Borrow<Value> {
 		let data = Mutex::new(ArrayIntoIter::new(data)
-			.map(|value| NillableValue::cloned(&value))
-			.map(NillableValue::option).enumerate()
+			.map(NillableValue::cloned).map(NillableValue::option).enumerate()
 			.map(|(index, value)| (Value::Integer(index as i64), value))
 			.filter_map(|(index, value)| value.map(|value| (index, value)))
 			.collect::<HashMap<_, _>>());
 		Table {data, ..Default::default()}
+	}
+
+	pub fn len(&self) -> i64 {
+		self.data.lock().unwrap().iter()
+			.filter_map(|(key, _)| key.integer())
+			.fold(0, |result, index| result.max(index))
 	}
 }
 

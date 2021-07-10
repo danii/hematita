@@ -21,7 +21,7 @@ fn main() {
 
 	println!("{:#?}", function);
 
-	execute(Arc::new(function), local, maplit::hashmap! {}).unwrap();
+	execute(&Arc::new(function), local, &mut maplit::hashmap! {}).unwrap();
 
 	//println!("{:?}", lexer.collect::<Vec<_>>());
 }

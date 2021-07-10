@@ -1,5 +1,10 @@
-if false then
-  print("SEX")
+x = {}
+function mything()
+  return x
 end
 
-print("LOL")
+function x["b"].d()
+
+end
+
+print(x.x)

@@ -101,27 +101,28 @@ pub fn parse_inner_expression(iter: &mut Peekable<impl Iterator<Item = Token>>,
 			},
 			_ => todo!()
 		},
-		// actor[]
-		Some(Token::OpenBracket) => {
-			iter.next();
-			let expression = Expression::Index {
-				indexee: Box::new(actor),
-				index: Box::new(parse_expression(iter))
-			};
 
-			let result = parse_inner_expression(iter, expression);
-			assert_eq!(iter.next(), Some(Token::CloseBracket));
-			parse_inner_expression(iter, result)
-		},
-		// actor + / -
-		Some(Token::Add | Token::Subtract) => {
+		// actor <binary operation>
+		Some(Token::Equal | Token::NotEqual |
+				Token::LessThan | Token::LessThanOrEqual |
+				Token::GreaterThan | Token::GreaterThanOrEqual |
+				Token::Add | Token::Subtract) => {
 			Expression::BinaryOperation {
 				left: Box::new(actor),
-				operator: if matches!(iter.next().unwrap(), Token::Add)
-					{BinaryOperator::Add} else {BinaryOperator::Subtract},
+				operator: match iter.next().unwrap() {
+					Token::Equal => BinaryOperator::Equal,
+					Token::NotEqual => BinaryOperator::NotEqual,
+					Token::LessThan => BinaryOperator::LessThan,
+					Token::LessThanOrEqual => BinaryOperator::LessThanOrEqual,
+					Token::GreaterThan => BinaryOperator::GreaterThan,
+					Token::GreaterThanOrEqual => BinaryOperator::GreaterThanOrEqual,
+					Token::Add => BinaryOperator::Add,
+					_ => unreachable!()
+				},
 				right: Box::new(parse_expression(iter))
 			}
 		},
+
 		// actor()
 		Some(Token::OpenParen) => {
 			iter.next();
@@ -147,6 +148,20 @@ pub fn parse_inner_expression(iter: &mut Peekable<impl Iterator<Item = Token>>,
 			};
 			parse_inner_expression(iter, expression)
 		},
+
+		// actor[]
+		Some(Token::OpenBracket) => {
+			iter.next();
+			let expression = Expression::Index {
+				indexee: Box::new(actor),
+				index: Box::new(parse_expression(iter))
+			};
+
+			let result = parse_inner_expression(iter, expression);
+			assert_eq!(iter.next(), Some(Token::CloseBracket));
+			parse_inner_expression(iter, result)
+		},
+
 		_ => actor
 	}
 }
@@ -230,8 +245,16 @@ pub fn parse_function_expression(iter: &mut Peekable<impl Iterator<Item = Token>
 	}
 }
 
+// TODO: Should we remove [crate::vm::BinaryOperation] and use this instead?
+// Same goes for UnaryOperator and Operation.
 #[derive(Debug)]
 pub enum BinaryOperator {
+	Equal,
+	NotEqual,
+	LessThan,
+	LessThanOrEqual,
+	GreaterThan,
+	GreaterThanOrEqual,
 	Add,
 	Subtract,
 	Multiply,
@@ -241,10 +264,16 @@ pub enum BinaryOperator {
 impl Display for BinaryOperator {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		match self {
+			Self::Equal => write!(f, "=="),
+			Self::NotEqual => write!(f, "~="),
+			Self::LessThan => write!(f, "<"),
+			Self::LessThanOrEqual => write!(f, "<="),
+			Self::GreaterThan => write!(f, ">"),
+			Self::GreaterThanOrEqual => write!(f, ">="),
 			Self::Add => write!(f, "+"),
 			Self::Subtract => write!(f, "-"),
 			Self::Multiply => write!(f, "*"),
-			Self::Divide => write!(f, "/")
+			Self::Divide => write!(f, "/"),
 		}
 	}
 }
@@ -264,6 +293,7 @@ pub struct ElseIf {
 	then: Block
 }
 
+// TODO: Sort these so they make sense...
 #[derive(Debug)]
 pub enum Expression {
 	Integer(i64),

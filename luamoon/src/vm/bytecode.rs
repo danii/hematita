@@ -1,4 +1,7 @@
-use self::super::{super::ast::parser::{Block, Expression, Statement}, Value, OpCode, Function};
+use self::super::{
+	super::{ast::parser::{BinaryOperator, Block, Expression, Statement}},
+	BinaryOperation, Function, OpCode, UnaryOperation, Value
+};
 use std::collections::HashSet;
 
 pub fn generate_bytecode(block: Block) -> Function {
@@ -157,7 +160,12 @@ impl ByteCodeGenerator {
 				let condition = condition
 					.unwrap_or_else(|| self.temporary_name(condition_tmp));
 
-				// TODO: Invert bcuz lol.
+				self.push(OpCode::UnaryOperation {
+					operand: condition,
+					operation: UnaryOperation::Not,
+					destination: condition,
+					local: true
+				});
 				let index = self.opcodes.len();
 				self.push(OpCode::Jump {
 					operation: 0,
@@ -170,7 +178,7 @@ impl ByteCodeGenerator {
 				let len = self.opcodes.len();
 				match &mut self.opcodes[index] {
 					OpCode::Jump {operation, ..} => *operation = len as u64,
-					_ => panic!()
+					_ => unreachable!()
 				}
 			},
 			_ => todo!()
@@ -180,7 +188,6 @@ impl ByteCodeGenerator {
 	fn generate_expression(&mut self, expression: Expression,
 			destination: Option<&'static str>)
 				-> (Option<&'static str>, usize) {
-		println!("{:?}", expression);
 		let (destination, temporary) = destination.map(|dst| (dst, usize::MAX))
 			.unwrap_or_else(|| self.temporary());
 		let destination_local = true;
@@ -292,6 +299,30 @@ impl ByteCodeGenerator {
 			Expression::False => {
 				let constant = self.constant(Value::Boolean(false));
 				self.push(OpCode::Load {constant, destination, destination_local});
+				None
+			},
+			Expression::BinaryOperation {left, operator, right} => {
+				let (first, first_tmp) = self.generate_expression(*left, None);
+				let first = first.unwrap_or_else(|| self.temporary_name(first_tmp));
+				let (second, second_tmp) = self.generate_expression(*right, None);
+				let second = second.unwrap_or_else(|| self.temporary_name(second_tmp));
+
+				let operation = match operator {
+					BinaryOperator::Equal => BinaryOperation::Equal,
+					BinaryOperator::NotEqual => BinaryOperation::NotEqual,
+					BinaryOperator::LessThan => BinaryOperation::LessThan,
+					BinaryOperator::LessThanOrEqual => BinaryOperation::LessThanOrEqual,
+					BinaryOperator::GreaterThan => BinaryOperation::GreaterThan,
+					BinaryOperator::GreaterThanOrEqual => BinaryOperation::GreaterThanOrEqual,
+					BinaryOperator::Add => BinaryOperation::Add,
+					BinaryOperator::Subtract => BinaryOperation::Subtract,
+					_ => todo!()
+					//BinaryOperator::Multiply => BinaryOperation::Multiply,
+					//BinaryOperator::Divide => BinaryOperation::Divide
+				};
+
+				self.push(OpCode::BinaryOperation {first, operation, second,
+					destination, local: destination_local});
 				None
 			},
 			_ => todo!()

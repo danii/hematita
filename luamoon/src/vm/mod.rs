@@ -3,19 +3,18 @@ pub mod value;
 
 use self::value::{Function, IntoNillableValue, Nil, NonNil, Table, Value};
 use if_chain::if_chain;
-use maplit::hashmap;
 use std::{collections::HashMap, sync::Arc};
 
 /// Executes a function.
-pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
-		mut _global: HashMap<Value, Value>) -> Result<Option<Value>, String> {
+pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
+		global: &mut HashMap<Value, Value>) -> Result<Arc<Table>, String> {
 	let mut index = 0; // The current opcode we're evaluating.
 	// current_opcode
 
 	loop {
 		match function.opcodes[index] {
 			OpCode::Call {arguments, function, ..} => {
-				let args = match local.get(&Value::identifier(arguments)).nillable() {
+				let args = match local.get(&Value::new_string(arguments)).nillable() {
 					NonNil(Value::Table(table)) => table,
 					// args is not a table.
 					args => break Err(format!(
@@ -23,7 +22,7 @@ pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
 							args.type_name()))
 				};
 
-				match local.get(&Value::identifier(function)).nillable() {
+				match local.get(&Value::new_string(function)).nillable() {
 					NonNil(Value::NativeFunction(func)) => {
 						// TODO: Return...
 						func(args.clone());
@@ -36,16 +35,16 @@ pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
 			},
 
 			OpCode::IndexRead {indexee, index, destination, ..} =>
-					match local.get(&Value::identifier(indexee)).nillable() {
+					match local.get(&Value::new_string(indexee)).nillable() {
 				// indexee is a table.
 				NonNil(Value::Table(table)) => {
-					let index = local.get(&Value::identifier(index))
+					let index = local.get(&Value::new_string(index))
 						.ok_or("table index is nil".to_owned())?; // table index is nil.
 					let table = table.data.lock().unwrap();
 					let value = table.get(index).map(Clone::clone);
 					drop(table); // Borrow checker stuff.
 
-					let destination = Value::identifier(destination);
+					let destination = Value::new_string(destination);
 					// value is not nil.
 					if let Some(value) = value {
 						local.insert(destination, value);
@@ -60,15 +59,15 @@ pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
 			},
 
 			OpCode::IndexWrite {indexee, index, value} =>
-					match local.get(&Value::identifier(indexee)).nillable() {
+					match local.get(&Value::new_string(indexee)).nillable() {
 				// indexee is a table.
 				NonNil(Value::Table(table)) => {
 					let mut lock = table.data.lock().unwrap();
-					let index = local.get(&Value::identifier(index))
+					let index = local.get(&Value::new_string(index))
 						.ok_or("table index is nil".to_owned())?; // index is nil.
 
 						// value is not nil.
-						if let Some(value) = local.get(&Value::identifier(value)) {
+						if let Some(value) = local.get(&Value::new_string(value)) {
 							lock.insert(index.clone(), value.clone());
 						// value is nil.
 					} else {
@@ -84,68 +83,147 @@ pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
 					match function.constants.get(constant as usize).nillable().cloned() {
 				// constant is not nil.
 				NonNil(constant) =>
-					{local.insert(Value::identifier(destination), constant);},
+					{local.insert(Value::new_string(destination), constant);},
 				// constant is.... nil?
-				Nil => {local.remove(&Value::identifier(destination));}
+				Nil => {local.remove(&Value::new_string(destination));}
 			},
 
 			OpCode::Create {destination, ..} =>
-				{local.insert(Value::identifier(destination),
+				{local.insert(Value::new_string(destination),
 					Value::Table(Arc::default()));},
 
 			OpCode::BinaryOperation {first, second, destination, operation, ..} => {
-				let first = local.get(&Value::identifier(first)).nillable();
-				let second = local.get(&Value::identifier(second)).nillable();
+				let first = local.get(&Value::new_string(first)).nillable();
+				let second = local.get(&Value::new_string(second)).nillable();
+				let destination = Value::new_string(destination);
 
-				todo!();
-				match operation {
-					BinaryOperation::LessThanOrEqual => match (first, second) {
-						(NonNil(Value::Integer(first)), NonNil(Value::Integer(second))) => {
-							Value::Boolean(first >= second);
-						},
-						(NonNil(Value::String(first)), NonNil(Value::String(second))) => {
-							Value::Boolean(first >= second);
-						},
-						(NonNil(Value::Table(metamethod)), second) if {
-								if_chain::if_chain! {
-									if let Some(metamethod) = metamethod.metatable;
-									if let Ok(metamethod) = metamethod.data.lock();
-									if let NonNil(metamethod) =
-										metamethod.get(&Value::identifier("__le")).nillable();
-									then {
-										match metamethod {
-											Value::Function(metamethod) => true,
-											Value::NativeFunction(metamethod) => {
-												metamethod(Table::array([first, second]).arc());
+				// Uneeded when 53667 and 51114.
+				// In order to have the match statement continue after we actually get
+				// the function object, we currently have to use a block within the if
+				// statements condition, primarily because 51114 isn't implemented yet,
+				// which would allow us to check the contents of the Mutex during match
+				// and save a variable with it's contents. 53667 needs to be implemented
+				// to, because we also need to pattern match through an Arc.
+				let mut transfer_result = None;
+				let result = match operation {
+					// BinaryOperation::Equal
 
-												true
-											},
-											_ => false
-										}
-									} else {false}
-								}
-							} => (),
+					// BinaryOPeration::NotEqual
+
+					// BinaryOperation::LessThan
+
+					BinaryOperation::LessThanOrEqual => match (&first, &second) {
+						(NonNil(Value::Integer(first)), NonNil(Value::Integer(second))) =>
+							Value::Boolean(first <= second),
+						(NonNil(Value::String(first)), NonNil(Value::String(second))) =>
+							Value::Boolean(first <= second),
+						/*
+							// Code for when features are added...
+							if let Some(metamethod) = &metamethod.metatable &&
+								if let NonNil(metamethod) = metamethod.data.lock().unwrap()
+									.get(&Value::identifier("__le")).nillable() => {
+						*/
+						(NonNil(Value::Table(metamethod)), _) if {
+							if_chain! {
+								if let Some(metamethod) = &metamethod.metatable;
+								if let NonNil(metamethod) = metamethod.data.lock().unwrap()
+									.get(&Value::new_string("__le")).nillable();
+								then {
+									match metamethod {
+										Value::Function(metamethod) => {
+											let mut arguments = HashMap::new();
+											if let NonNil(first) = first.cloned()
+												{arguments.insert(Value::Integer(0), first);}
+											if let NonNil(second) = second.cloned()
+												{arguments.insert(Value::Integer(0), second);}
+											transfer_result = Some(execute(
+												&*metamethod, arguments, global)?);
+											true
+										},
+										Value::NativeFunction(metamethod) => {
+											transfer_result = Some(metamethod(
+												Table::array([&first, &second]).arc()));
+											true
+										},
+										_ => false
+									}
+								} else {false}
+							}
+						} => {
+							// Panic is impossible because we put in something in the if.
+							transfer_result.unwrap().data.lock().unwrap()
+								.get(&Value::Integer(0)).nillable().coerce_to_boolean()
+						},
+						/*
+							// Code for when features are added...
+							if let Some(metamethod) = &metamethod.metatable &&
+								if let NonNil(metamethod) = metamethod.data.lock().unwrap()
+									.get(&Value::identifier("__le")).nillable() => {
+						*/
+						(_, NonNil(Value::Table(metamethod))) if {
+							if_chain! {
+								if let Some(metamethod) = &metamethod.metatable;
+								if let NonNil(metamethod) = metamethod.data.lock().unwrap()
+									.get(&Value::new_string("__le")).nillable();
+								then {
+									match metamethod {
+										Value::Function(metamethod) => {
+											let mut arguments = HashMap::new();
+											if let NonNil(first) = first.cloned()
+												{arguments.insert(Value::Integer(0), first);}
+											if let NonNil(second) = second.cloned()
+												{arguments.insert(Value::Integer(0), second);}
+											transfer_result = Some(execute(
+												&*metamethod, arguments, global)?);
+											true
+										},
+										Value::NativeFunction(metamethod) => {
+											transfer_result = Some(metamethod(
+												Table::array([&first, &second]).arc()));
+											true
+										},
+										_ => false
+									}
+								} else {false}
+							}
+						} => {
+							// Panic is impossible because we put in something in the if.
+							transfer_result.unwrap().data.lock().unwrap()
+								.get(&Value::Integer(0)).nillable().coerce_to_boolean()
+						},
 						_ => todo!()
 					},
-					_ => todo!()
-				}
-			},
-			/*{
-				let first = local.get(&Value::String(first.to_string().into_boxed_str()));
-				let second = local.get(&Value::String(second.to_string().into_boxed_str()));
+					
+					// BinaryOperation::GreaterThan
 
-				let result = match (first, second) {
-					(Some(Value::Integer(first)), Some(Value::Integer(second))) => first <= second,
+					// BinaryOperation::LessThan
+
+					// BinaryOperation::Add
+
+					// BinaryOperation::Subtract
+
 					_ => todo!()
 				};
 
-				local.insert(Value::String(destination.to_string().into_boxed_str()), Value::Boolean(result));
-			},*/
-			// OpCode::UnaryOperation
+				local.insert(destination, result);
+			},
+
+			OpCode::UnaryOperation {operand, operation, destination, ..} => {
+				let operand = local.get(&Value::new_string(operand)).nillable();
+				let destination = Value::new_string(destination);
+
+				let result = match operation {
+					UnaryOperation::Not => Value::Boolean(!operand.coerce_to_bool())
+				};
+
+				local.insert(destination, result);
+			},
+
 			OpCode::Jump {operation, r#if: None} => {
 				index = operation as usize;
 				continue;
 			},
+
 			OpCode::Jump {operation, r#if: Some(check)} => {
 				let check = local.get(&Value::String(check.to_string().into_boxed_str()));
 				match check {
@@ -157,12 +235,18 @@ pub fn execute(function: Arc<Function>, mut local: HashMap<Value, Value>,
 					_ => todo!()
 				}
 			},
-			OpCode::Return {result} => break Ok(Some(local.remove(&Value::String(result.to_string().into_boxed_str())).unwrap())),
+
+			OpCode::Return {result} => match local.get(
+					&Value::new_string(result)).nillable() {
+				NonNil(Value::Table(result)) => break Ok(result.clone()),
+				_ => panic!()
+			},
+
 			_ => todo!()
 		}
 
 		index = index + 1;
-		if index == function.opcodes.len() {return Ok(None)}
+		if index == function.opcodes.len() {break Ok(Table::default().arc())}
 	}
 }
 
@@ -265,16 +349,16 @@ pub enum OpCode<'s> {
 	BinaryOperation {
 		first: &'s str,
 		second: &'s str,
+		operation: BinaryOperation,
 		destination: &'s str,
-		local: bool,
-		operation: BinaryOperation
+		local: bool
 	},
 
 	UnaryOperation {
 		operand: &'s str,
+		operation: UnaryOperation,
 		destination: &'s str,
-		destination_local: bool,
-		operation: UnaryOperation
+		local: bool
 	},
 
 	/// Jumps unconditionally to [operation], or conditionally if the name of a
@@ -294,10 +378,18 @@ pub enum OpCode<'s> {
 	}
 }
 
+// TODO: Should we remove [crate::ast::parser::BinaryOperator] and use this
+// instead? Same goes for UnaryOperation and Operator.
 #[derive(Clone, Copy, Debug)]
 pub enum BinaryOperation {
+	Equal,
+	NotEqual,
 	LessThan,
-	LessThanOrEqual
+	LessThanOrEqual,
+	GreaterThan,
+	GreaterThanOrEqual,
+	Add,
+	Subtract
 }
 
 #[derive(Clone, Copy, Debug)]
