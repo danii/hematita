@@ -217,7 +217,8 @@ impl ByteCodeGenerator {
 					destination: Box::leak(name.into_boxed_str()),
 					destination_local: local
 				})
-			}
+			},
+			_ => todo!()
 		}
 	}
 

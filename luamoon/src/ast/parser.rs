@@ -63,7 +63,8 @@ impl<I> TokenIterator<I>
 		self.peek()
 	}
 
-	/// Returns the next token, assuming it's an identifier.
+	/// Returns the next token, assuming it was peeked and matched as an
+	/// identifier.
 	fn identifier(&mut self) -> String {
 		match self.next() {
 			Some(Token::Identifier(identifier)) => identifier,
@@ -71,7 +72,7 @@ impl<I> TokenIterator<I>
 		}
 	}
 
-	/// Returns the next token, assuming it's a string.
+	/// Returns the next token, assuming it was peeked and matched as a string.
 	fn string(&mut self) -> String {
 		match self.next() {
 			Some(Token::String(string)) => string,
@@ -79,7 +80,7 @@ impl<I> TokenIterator<I>
 		}
 	}
 
-	/// Returns the next token, assuming it's an integer.
+	/// Returns the next token, assuming it was peeked and matched as an integer.
 	fn integer(&mut self) -> i64 {
 		match self.next() {
 			Some(Token::Integer(integer)) => integer,
@@ -144,11 +145,20 @@ pub fn parse(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 				statements.push(Statement::Function {name, arguments, body, local})
 			},
 
-			// if actor
+			// if
 			Some(Token::KeywordIf) => statements.push(parse_if(iter)?),
 
-			Some(Token::KeywordEnd) | None => break Ok(Block(statements)),
-			Some(_) => break Err(Error(iter.next()))
+			// for
+			Some(Token::KeywordFor) => statements.push(parse_for(iter)?),
+
+			// while
+			// repeat
+			Some(Token::KeywordWhile | Token::KeywordRepeat) =>
+				statements.push(parse_while(iter)?),
+
+			//Some(Token::KeywordEnd) | None => break Ok(Block(statements)),
+			_ => break Ok(Block(statements))
+			//Some(_) => break Err(Error(iter.next()))
 		}
 	}
 }
@@ -171,11 +181,7 @@ pub fn parse_expression(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 		},
 
 		// Function Call
-		Some(Token::OpenCurly) => {
-			iter.eat();
-			assert_eq!(iter.next(), Some(Token::CloseCurly));
-			Ok(Expression::Table())
-		},
+		Some(Token::OpenCurly) => parse_table(iter),
 		Some(Token::KeywordFunction) => {
 			let (_, arguments, body) = parse_function(iter, false)?;
 			Ok(Expression::Function {arguments, body})
@@ -224,10 +230,22 @@ pub fn parse_inner_expression(iter: &mut TokenIterator<impl Iterator<Item = Toke
 				_ => Some(Err(Error(iter.next())))
 			}).try_collect()?;
 
-			parse_inner_expression(iter, Expression::Call {
-				function: Box::new(actor),
-				arguments
-			})
+			let function = Box::new(actor);
+			parse_inner_expression(iter, Expression::Call {function, arguments})
+		},
+
+		// actor "string"
+		Some(Token::String(_)) => {
+			let arguments = vec![Expression::String(iter.string())];
+			let function = Box::new(actor);
+			parse_inner_expression(iter, Expression::Call {function, arguments})
+		},
+
+		// actor {"table"}
+		Some(Token::OpenCurly) => {
+			let arguments = vec![parse_table(iter)?];
+			let function = Box::new(actor);
+			parse_inner_expression(iter, Expression::Call {function, arguments})
 		},
 
 		// actor.
@@ -262,6 +280,101 @@ pub fn parse_inner_expression(iter: &mut TokenIterator<impl Iterator<Item = Toke
 	}
 }
 
+pub fn parse_table(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
+		-> Result<Expression> {
+	expect!(iter.next(), Token::OpenCurly);
+
+	let mut array = Vec::new();
+	let mut key_value = Vec::new();
+	let mut first = true;
+	loop {
+		match iter.peek() {
+			// [actor] = value
+			Some(Token::OpenBracket) => {
+				iter.eat(); let key = parse_expression(iter)?;
+				expect!(iter.next(), Token::CloseBracket);
+				expect!(iter.next(), Token::Assign);
+				let value = parse_expression(iter)?;
+
+				match iter.next() {
+					// [actor] = value,
+					Some(Token::Comma) => key_value.push(KeyValue {key, value}),
+
+					// [actor] = value}
+					Some(Token::CloseCurly) => {
+						key_value.push(KeyValue {key, value});
+						break Ok(Expression::Table {array, key_value})
+					},
+
+					// Unexpected token.
+					token => break Err(Error(token))
+				}
+			},
+
+			// actor
+			Some(Token::Identifier(_)) => {
+				let key = Expression::Identifier(iter.identifier());
+
+				match iter.next() {
+					// actor,
+					Some(Token::Comma) => array.push(key),
+		
+					// actor = value
+					Some(Token::Assign) => {
+						let value = parse_expression(iter)?;
+						match iter.next() {
+							// actor = value,
+							Some(Token::Comma) => key_value.push(KeyValue {key, value}),
+		
+							// actor = value}
+							Some(Token::CloseCurly) => {
+								key_value.push(KeyValue {key, value});
+								break Ok(Expression::Table {array, key_value})
+							},
+		
+							// Unexpected token.
+							token => break Err(Error(token))
+						}
+					},
+		
+					// actor}
+					Some(Token::CloseCurly) => {
+						array.push(key);
+						break Ok(Expression::Table {array, key_value})
+					},
+		
+					// Unexpected token.
+					token => break Err(Error(token))
+				}
+			},
+
+			// }
+			Some(Token::CloseCurly) if first =>
+				{iter.eat(); break Ok(Expression::Table {array, key_value})},
+
+			// expr
+			_ => {
+				array.push(parse_expression(iter)?);
+
+				match iter.next() {
+					// expr,
+					Some(Token::Comma) => continue,
+
+					// expr}
+					Some(Token::CloseCurly) =>
+						break Ok(Expression::Table {array, key_value}),
+
+					// Unexpected token.
+					token => break Err(Error(token))
+				}
+			}
+		}
+
+		first = false;
+		
+	}
+}
+
 pub fn parse_if(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 		-> Result<Statement> {
 	expect!(iter.next(), Token::KeywordIf);
@@ -280,6 +393,7 @@ pub fn parse_if(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 		},
 		Some(Token::KeywordElse) => {
 			r#else = Some(iter_throw!(parse(iter)));
+			iter_expect!(iter.next(), Token::KeywordEnd);
 			None
 		},
 		token => Some(Err(Error(token)))
@@ -290,6 +404,74 @@ pub fn parse_if(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 		then,
 		else_ifs,
 		r#else
+	})
+}
+
+pub fn parse_for(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
+		-> Result<Statement> {
+	expect!(iter.next(), Token::KeywordFor);
+	let variable = match iter.next() {
+		Some(Token::Identifier(argument)) => argument,
+		token => return Err(Error(token))
+	};
+
+	match iter.next() {
+		// for i = 1, i < 10, 2 do
+		Some(Token::Assign) => {
+			let first = parse_expression(iter)?;
+			expect!(iter.next(), Token::Comma);
+			let condition = parse_expression(iter)?;
+
+			let step = match iter.next() {
+				Some(Token::Comma) => {
+					let step = parse_expression(iter)?;
+					expect!(iter.next(), Token::KeywordDo);
+					step
+				},
+				Some(Token::KeywordDo) => Expression::Integer(1),
+				token => return Err(Error(token))
+			};
+
+			let r#do = parse(iter)?;
+			expect!(iter.next(), Token::KeywordEnd);
+			Ok(Statement::NumericFor {variable, first, condition, step, r#do})
+		},
+
+		// for item in iter do
+		Some(Token::KeywordIn) => {
+			let iterator = parse_expression(iter)?;
+			expect!(iter.next(), Token::KeywordDo);
+			let r#do = parse(iter)?;
+			expect!(iter.next(), Token::KeywordEnd);
+			Ok(Statement::GenericFor {variable, iterator, r#do})
+		},
+
+		token => Err(Error(token))
+	}
+}
+
+pub fn parse_while(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
+		-> Result<Statement> {
+	Ok(match iter.next() {
+		// while condition do
+		Some(Token::KeywordWhile) => {
+			let condition = parse_expression(iter)?;
+			expect!(iter.next(), Token::KeywordDo);
+			let block = parse(iter)?;
+			expect!(iter.next(), Token::KeywordEnd);
+			Statement::While {condition, block, run_first: false}
+		},
+
+		// until condition
+		Some(Token::KeywordRepeat) => {
+			let block = parse(iter)?;
+			expect!(iter.next(), Token::KeywordUntil);
+			let condition = parse_expression(iter)?;
+			Statement::While {condition, block, run_first: true}
+		},
+
+		// Unexpected token.
+		token => return Err(Error(token))
 	})
 }
 
@@ -329,6 +511,311 @@ pub fn parse_function(iter: &mut TokenIterator<impl Iterator<Item = Token>>,
 	Ok((name, arguments, body))
 }
 
+#[derive(Debug)]
+pub struct Block(pub Vec<Statement>);
+
+impl Display for Block {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		self.0.iter().try_for_each(|stmt| write!(f, "{}\n", stmt))
+	}
+}
+
+#[derive(Debug)]
+pub enum Statement {
+	// Control
+
+	/// An if statement.
+	If {
+		/// The condition for the if statement.
+		condition: Expression,
+
+		/// The block of statements to be ran if the condition is met.
+		then: Block,
+
+		/// Other conditions and statements to evaluate if the main condition wasn't
+		/// met.
+		else_ifs: Vec<ElseIf>,
+
+		/// The block of statements to be ran if no other conditions were met.
+		r#else: Option<Block>
+	},
+
+	/// A for in loop.
+	GenericFor {
+		/// The variable to set to the value of each item being iterated.
+		variable: String,
+
+		/// The expression to evaluate to get the iterator.
+		iterator: Expression,
+
+		/// The block of statements to be ran every item.
+		r#do: Block
+	},
+
+	/// A numeric for loop.
+	NumericFor {
+		/// The variable to set the first value to.
+		variable: String,
+
+		/// The first value.
+		first: Expression,
+
+		/// The condition.
+		condition: Expression,
+
+		/// The amount to step.
+		step: Expression,
+
+		/// The block of statements to be ran every time.
+		r#do: Block
+	},
+
+	/// A while or repeat loop.
+	While {
+		/// The condition to check.
+		condition: Expression,
+
+		/// The block of statements to be ran every time.
+		block: Block,
+
+		/// Whether or not to run block first before checking condition.
+		run_first: bool
+	},
+
+	// El assignment
+
+	/// An assignment operator.
+	Assign {
+		/// The name of the value to assign to.
+		actor: Expression,
+
+		/// The value to assign.
+		value: Expression,
+
+		/// Whether or not this should be local.
+		local: bool
+	},
+
+	// Expressions
+
+	Call {
+		function: Expression,
+		arguments: Vec<Expression>
+	},
+	
+	Function {
+		name: String,
+		arguments: Vec<String>,
+		body: Block,
+		local: bool
+	}
+}
+
+impl Display for Statement {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		match self {
+			// Control
+
+			Self::If {condition, then, r#else, else_ifs} => {
+				write!(f, "if {} then\n{}", condition, then)?;
+				else_ifs.iter().try_for_each(|ElseIf {condition, then}|
+					write!(f, "elseif {} then\n{}", condition, then))?;
+				if let Some(r#else) = r#else {write!(f, "else\n{}", r#else)?}
+				write!(f, "end")
+			},
+
+			Self::GenericFor {variable, iterator, r#do} =>
+				write!(f, "for {} in {} do\n{}end", variable, iterator, r#do),
+			Self::NumericFor {variable, first, condition, step, r#do} =>
+				write!(f, "for {} = {}, {}, {} do\n{}end", variable, first, condition,
+					step, r#do),
+			Self::While {condition, block, run_first: false} =>
+				write!(f, "while {} do\n{}end", condition, block),
+			Self::While {condition, block, run_first: true} =>
+				write!(f, "repeat\n{}until {}", block, condition),
+			
+			// Assignment
+
+			Self::Assign {actor, value, local} => if *local
+				{write!(f, "local {} = {}", actor, value)} else
+				{write!(f, "{} = {}", actor, value)},
+
+			// Expressions
+
+			Self::Call {function, arguments} => {
+				write!(f, "{}(", function)?;
+				arguments.iter().enumerate().try_for_each(|(index, expr)| {
+					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
+				})?;
+				write!(f, ")")
+			},
+			Self::Function {name, arguments, body, local} => {
+				if *local {write!(f, "local ")?}
+				write!(f, "function {}(", name)?;
+				arguments.iter().enumerate().try_for_each(|(index, expr)| {
+					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
+				})?;
+				write!(f, ")\n{}end", body)
+			}
+		}
+	}
+}
+
+// TODO: Sort these so they make sense...
+#[derive(Debug)]
+pub enum Expression {
+	// La identifier
+
+	/// A reference to a stored value, an identifier.
+	Identifier(String),
+
+	// Singleton literals
+
+	/// The literal nil value.
+	Nil,
+
+	/// The literal boolean true value.
+	True,
+
+	/// The literal boolean false value.
+	False,
+
+	// Literals
+
+	/// A literal integer.
+	Integer(i64),
+
+	/// A literal string.
+	String(String),
+
+	// Complicated literals
+
+	/// A literal table.
+	Table {
+		/// The array expressions of this table, expressions without a denotated
+		/// key. These are typically evaluated after the key denoted expressions,
+		/// meaning that `{1, [1] = "A"}` evaluates to `self[1]` being 1.
+		array: Vec<Expression>,
+
+		/// The key denoted expressions of this table. Identifiers without brackets
+		/// used as keys are desugared into bracketed strings.
+		key_value: Vec<KeyValue>
+	},
+
+	/// A literal function.
+	Function {
+		/// The name of the arguments.
+		arguments: Vec<String>,
+
+		/// The statements in the table.
+		body: Block
+	},
+
+	// Operations
+
+	/// A call expression of something.
+	Call {
+		/// The expression of the thing being called.
+		function: Box<Expression>,
+
+		/// The provided expression arguments to be passed to the function.
+		arguments: Vec<Expression>
+	},
+
+	/// An index operation.
+	Index {
+		/// The expression of the thing being indexed.
+		indexee: Box<Expression>,
+
+		/// The index. Period notation is desugared into bracketed strings.
+		index: Box<Expression>
+	},
+
+	/// A binary operation.
+	BinaryOperation {
+		left: Box<Expression>,
+		operator: BinaryOperator,
+		right: Box<Expression>
+	}
+}
+
+impl Display for Expression {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		match self {
+			// Identifier
+
+			Self::Identifier(identifier) => write!(f, "{}", identifier),
+
+			// Singleton literals
+
+			Self::Nil => write!(f, "nil"),
+			Self::True => write!(f, "true"),
+			Self::False => write!(f, "false"),
+
+			// Literals
+
+			Self::Integer(integer) => write!(f, "{}", integer),
+			Self::String(string) => write!(f, "{:?}", string),
+
+			// Complicated literals
+
+			Self::Table {array, key_value} => {
+				write!(f, "{{")?;
+				
+				let mut first = true;
+				let mut is_first = || {let value = first; first = false; value};
+				array.iter().try_for_each(|value| if is_first() {
+					write!(f, "{}", value)
+				} else {
+					write!(f, ", {}", value)
+				})?;
+				key_value.iter().try_for_each(|KeyValue {key, value}| if is_first() {
+					write!(f, "[{}] = {}", key, value)
+				} else {
+					write!(f, ", [{}] = {}", key, value)
+				})?;
+
+				write!(f, "}})")
+			},
+
+			Self::Function {arguments, body} => {
+				write!(f, "function(")?;
+				arguments.iter().enumerate().try_for_each(|(index, expr)| {
+					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
+				})?;
+				write!(f, ")\n{}end", body)
+			},
+
+			// Operations
+
+			Self::Call {function, arguments} => {
+				write!(f, "{}(", function)?;
+				arguments.iter().enumerate().try_for_each(|(index, expr)| {
+					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
+				})?;
+				write!(f, ")")
+			},
+
+			Self::Index {indexee, index} => write!(f, "{}[{}]", indexee, index),
+
+			Self::BinaryOperation {left, operator, right} =>
+				write!(f, "{} {} {}", left, operator, right)
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct ElseIf {
+	condition: Expression,
+	then: Block
+}
+
+#[derive(Debug)]
+pub struct KeyValue {
+	key: Expression,
+	value: Expression
+}
+
 // TODO: Should we remove [crate::vm::BinaryOperation] and use this instead?
 // Same goes for UnaryOperator and Operation.
 #[derive(Debug)]
@@ -361,181 +848,3 @@ impl Display for BinaryOperator {
 		}
 	}
 }
-
-#[derive(Debug)]
-pub struct Block(pub Vec<Statement>);
-
-impl Display for Block {
-	fn fmt(&self, f: &mut Formatter) -> FMTResult {
-		self.0.iter().try_for_each(|stmt| write!(f, "{}\n", stmt))
-	}
-}
-
-#[derive(Debug)]
-pub struct ElseIf {
-	condition: Expression,
-	then: Block
-}
-
-// TODO: Sort these so they make sense...
-#[derive(Debug)]
-pub enum Expression {
-	Integer(i64),
-	String(String),
-	Identifier(String),
-	Table(),
-	Nil,
-	True,
-	False,
-	Call {
-		function: Box<Expression>,
-		arguments: Vec<Expression>
-	},
-	Index {
-		indexee: Box<Expression>,
-		index: Box<Expression>
-	},
-	BinaryOperation {
-		left: Box<Expression>,
-		operator: BinaryOperator,
-		right: Box<Expression>
-	},
-	Function {
-		arguments: Vec<String>,
-		body: Block
-	}
-}
-
-impl Display for Expression {
-	fn fmt(&self, f: &mut Formatter) -> FMTResult {
-		match self {
-			Self::Integer(integer) => write!(f, "{}", integer),
-			Self::String(string) => write!(f, "{:?}", string),
-			Self::Identifier(identifier) => write!(f, "{}", identifier),
-			Self::Call {function, arguments} => {
-				write!(f, "{}(", function)?;
-				arguments.iter().enumerate().try_for_each(|(index, expr)| {
-					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
-				})?;
-				write!(f, ")")
-			},
-			Self::Index {indexee, index} => write!(f, "{}[{}]", indexee, index),
-			Self::BinaryOperation {left, operator, right} =>
-				write!(f, "{} {} {}", left, operator, right),
-			Self::Function {arguments, body} => {
-				write!(f, "function(")?;
-				arguments.iter().enumerate().try_for_each(|(index, expr)| {
-					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
-				})?;
-				write!(f, ")\n{}end", body)
-			}	,
-			_ => write!(f, "<pls dipslay me>")
-		}
-	}
-}
-
-#[derive(Debug)]
-pub enum Statement {
-	Call {
-		function: Expression,
-		arguments: Vec<Expression>
-	},
-	Assign {
-		actor: Expression,
-		value: Expression,
-		local: bool
-	},
-	If {
-		condition: Expression,
-		then: Block,
-		else_ifs: Vec<ElseIf>,
-		r#else: Option<Block>
-	},
-	Function {
-		name: String,
-		arguments: Vec<String>,
-		body: Block,
-		local: bool
-	}
-}
-
-impl Display for Statement {
-	fn fmt(&self, f: &mut Formatter) -> FMTResult {
-		match self {
-			Self::Call {function, arguments} => {
-				write!(f, "{}(", function)?;
-				arguments.iter().enumerate().try_for_each(|(index, expr)| {
-					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
-				})?;
-				write!(f, ")")
-			},
-			Self::Assign {actor, value, local} => if *local
-				{write!(f, "local {} = {}", actor, value)} else
-				{write!(f, "{} = {}", actor, value)},
-			Self::If {condition, then, ..} =>
-				write!(f, "if {} then\n{}end", condition, then),
-			Self::Function {name, arguments, body, local} => {
-				if *local {write!(f, "local ")?}
-				write!(f, "function {}(", name)?;
-				arguments.iter().enumerate().try_for_each(|(index, expr)| {
-					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
-				})?;
-				write!(f, ")\n{}end", body)
-			}	
-		}
-	}
-}
-
-/*
-pub struct Parser<T>
-		where T: Iterator<Item = Token> {
-	pub source: Peekable<T>
-}
-
-impl<T> Parser<T>
-		where T: Iterator<Item = Token> {
-	fn exp_value(&mut self) -> Expression {
-		match self.source.next().unwrap() {
-			Token::Identifier(identifier) => Expression::Identifier(identifier),
-			Token::Integer(number) => Expression::Integer(number),
-			_ => todo!()
-		}
-	}
-}
-
-impl<T> Iterator for Parser<T>
-		where T: Iterator<Item = Token> {
-	type Item = Statement;
-
-	fn next(&mut self) -> Option<Statement> {
-		Some(match self.source.next()? {
-			Token::Identifier(actor) => match self.source.next() {
-				Some(Token::OpenParen) => {
-					let mut call_expressions = Vec::new();
-
-					loop {
-						match self.source.peek() {
-							Some(Token::CloseParen) => {
-								self.source.next();
-								break Statement::Call(actor, call_expressions)
-							},
-							Some(Token::Comma) => {
-								self.source.next();
-								// TODO: Make commas make sense
-							},
-							Some(_) => call_expressions.push(self.exp_value()),
-							_ => todo!()
-						}
-					}
-				},
-
-				Some(Token::Assign) => {
-					let expr = self.exp_value();
-					Statement::Assignment(actor, expr)
-				},
-				_ => todo!()
-			},
-			_ => todo!()
-		})
-	}
-}*/
