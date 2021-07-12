@@ -1,4 +1,9 @@
-use luamoon::{ast::{lexer::Lexer, parser::{TokenIterator, parse}}, lua_lib::print, vm::{value::Value, bytecode::generate_bytecode, execute}};
+use luamoon::{
+	ast::{lexer::Lexer, parser::{TokenIterator, parse}},
+	compiler::compile,
+	lua_lib::print,
+	vm::{value::Value, execute}
+};
 use maplit::hashmap;
 use std::{env::args, fs::File, io::Read};
 
@@ -27,7 +32,7 @@ fn main() {
 			let tokens = Lexer {source: code.chars().peekable()};
 			let block = parse(&mut TokenIterator(tokens.peekable()));
 			let function = match block {
-				Ok(block) => generate_bytecode(block),
+				Ok(block) => compile(&block),
 				Err(error) => return println!("SYNTAX ERROR: {}", error)
 			};
 
@@ -37,7 +42,7 @@ fn main() {
 			let tokens = Lexer {source: code.chars().peekable()};
 			let block = parse(&mut TokenIterator(tokens.peekable()));
 			let function = match block {
-				Ok(block) => generate_bytecode(block),
+				Ok(block) => compile(&block),
 				Err(error) => return println!("SYNTAX ERROR: {}", error)
 			};
 

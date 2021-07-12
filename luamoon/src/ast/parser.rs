@@ -1,7 +1,11 @@
-use itertools::Itertools;
-
 use self::super::lexer::Token;
-use std::{fmt::{Display, Formatter, Result as FMTResult}, iter::{Peekable, from_fn}};
+use itertools::Itertools;
+use std::{
+	error::Error as STDError,
+	fmt::{Display, Formatter, Result as FMTResult},
+	iter::{Peekable, from_fn},
+	result::Result as STDResult
+};
 
 macro_rules! expect {
 	($value:expr, $type:pat) => {
@@ -26,10 +30,12 @@ macro_rules! iter_throw {
 	}
 }
 
+pub type Result<T> = STDResult<T, Error>;
+
 #[derive(Debug)]
 pub struct Error(Option<Token>);
 
-impl std::error::Error for Error {}
+impl STDError for Error {}
 
 impl Display for Error {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
@@ -39,8 +45,6 @@ impl Display for Error {
 		}
 	}
 }
-
-pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct TokenIterator<I>(pub Peekable<I>)
 	where I: Iterator<Item = Token>;
@@ -187,7 +191,7 @@ pub fn parse_expression(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 			Ok(Expression::Function {arguments, body})
 		},
 		Some(Token::LiteralNil) => {iter.eat(); Ok(Expression::Nil)},
-		Some(Token::LiteralTrue) => {iter.eat(); Ok(Expression::True)},
+		Some(Token::LiteralTrue) => {iter.eat(); parse_inner_expression(iter, Expression::True)},
 		Some(Token::LiteralFalse) => {iter.eat(); Ok(Expression::False)},
 		_ => Err(Error(iter.next()))
 	}
@@ -199,7 +203,8 @@ pub fn parse_inner_expression(iter: &mut TokenIterator<impl Iterator<Item = Toke
 		// actor <binary operation>
 		Some(Token::Equal | Token::NotEqual | Token::LessThan
 				| Token::LessThanOrEqual | Token::GreaterThan
-				| Token::GreaterThanOrEqual | Token::Add | Token::Subtract) =>
+				| Token::GreaterThanOrEqual | Token::Add | Token::Subtract
+				| Token::KeywordAnd | Token::KeywordOr) =>
 					Ok(Expression::BinaryOperation {
 			left: Box::new(actor),
 			operator: match iter.next().unwrap() {
@@ -210,6 +215,8 @@ pub fn parse_inner_expression(iter: &mut TokenIterator<impl Iterator<Item = Toke
 				Token::GreaterThan => BinaryOperator::GreaterThan,
 				Token::GreaterThanOrEqual => BinaryOperator::GreaterThanOrEqual,
 				Token::Add => BinaryOperator::Add,
+				Token::KeywordAnd => BinaryOperator::And,
+				Token::KeywordOr => BinaryOperator::Or,
 				_ => unreachable!()
 			},
 			right: Box::new(parse_expression(iter)?)
@@ -511,7 +518,7 @@ pub fn parse_function(iter: &mut TokenIterator<impl Iterator<Item = Token>>,
 	Ok((name, arguments, body))
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Block(pub Vec<Statement>);
 
 impl Display for Block {
@@ -520,7 +527,7 @@ impl Display for Block {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Statement {
 	// Control
 
@@ -661,8 +668,8 @@ impl Display for Statement {
 	}
 }
 
-// TODO: Sort these so they make sense...
-#[derive(Debug)]
+// TODO: Clone? Why?
+#[derive(Clone, Debug)]
 pub enum Expression {
 	// La identifier
 
@@ -804,13 +811,13 @@ impl Display for Expression {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ElseIf {
 	condition: Expression,
 	then: Block
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct KeyValue {
 	key: Expression,
 	value: Expression
@@ -818,7 +825,7 @@ pub struct KeyValue {
 
 // TODO: Should we remove [crate::vm::BinaryOperation] and use this instead?
 // Same goes for UnaryOperator and Operation.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum BinaryOperator {
 	Equal,
 	NotEqual,
@@ -829,7 +836,9 @@ pub enum BinaryOperator {
 	Add,
 	Subtract,
 	Multiply,
-	Divide
+	Divide,
+	And,
+	Or
 }
 
 impl Display for BinaryOperator {
@@ -845,6 +854,8 @@ impl Display for BinaryOperator {
 			Self::Subtract => write!(f, "-"),
 			Self::Multiply => write!(f, "*"),
 			Self::Divide => write!(f, "/"),
+			Self::And => write!(f, "and"),
+			Self::Or => write!(f, "or")
 		}
 	}
 }

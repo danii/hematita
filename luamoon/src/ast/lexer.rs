@@ -54,6 +54,7 @@ impl<T> Lexer<T>
 		}
 
 		Some(match &identifier as &str {
+			"and" => Token::KeywordAnd,
 			"true" => Token::LiteralTrue,
 			"false" => Token::LiteralFalse,
 			"nil" => Token::LiteralNil,
@@ -68,6 +69,8 @@ impl<T> Lexer<T>
 			"if" => Token::KeywordIf,
 			"in" => Token::KeywordIn,
 			"local" => Token::KeywordLocal,
+			"not" => Token::KeywordNot,
+			"or" => Token::KeywordOr,
 			"repeat" => Token::KeywordRepeat,
 			"then" => Token::KeywordThen,
 			"until" => Token::KeywordUntil,
@@ -215,6 +218,7 @@ pub enum Token {
 	LiteralNil,
 
 	// Keywords
+	KeywordAnd,
 	KeywordBreak,
 	KeywordDo,
 	KeywordElse,
@@ -226,6 +230,8 @@ pub enum Token {
 	KeywordIf,
 	KeywordIn,
 	KeywordLocal,
+	KeywordNot,
+	KeywordOr,
 	KeywordRepeat,
 	KeywordThen,
 	KeywordUntil,
@@ -268,6 +274,7 @@ impl std::fmt::Display for Token {
 			Self::LiteralNil => write!(f, "nil"),
 
 			// Keywords
+			Self::KeywordAnd => write!(f, "and"),
 			Self::KeywordBreak => write!(f, "break"),
 			Self::KeywordDo => write!(f, "do"),
 			Self::KeywordElse => write!(f, "else"),
@@ -279,6 +286,8 @@ impl std::fmt::Display for Token {
 			Self::KeywordIf => write!(f, "if"),
 			Self::KeywordIn => write!(f, "in"),
 			Self::KeywordLocal => write!(f, "local"),
+			Self::KeywordNot => write!(f, "not"),
+			Self::KeywordOr => write!(f, "or"),
 			Self::KeywordRepeat => write!(f, "repeat"),
 			Self::KeywordThen => write!(f, "then"),
 			Self::KeywordUntil => write!(f, "until"),

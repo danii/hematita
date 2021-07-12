@@ -241,14 +241,10 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 			},
 
 			OpCode::Jump {operation, r#if: Some(check)} => {
-				let check = local.get(&Value::String(check.to_string().into_boxed_str()));
-				match check {
-					Some(Value::Boolean(true)) => {
-						index = operation as usize;
-						continue;
-					},
-					Some(Value::Boolean(false)) => (),
-					_ => todo!()
+				let check = local.get(&Value::new_string(check));
+				if check.nillable().coerce_to_bool() {
+					index = operation as usize;
+					continue
 				}
 			},
 
@@ -256,7 +252,9 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 					&Value::new_string(result)).nillable() {
 				NonNil(Value::Table(result)) => break Ok(result.clone()),
 				_ => panic!()
-			}
+			},
+
+			OpCode::NoOp => ()
 		}
 
 		index = index + 1;
@@ -276,7 +274,7 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 /// debug module to access these temporary variables, but tampering with them
 /// won't do much more than corrupt the state of the currently executing
 /// function.
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum OpCode<'s> {
 	/// Calls a function with the name [function], with the arguments array
 	/// [arguments], and stores the result array in [destination]. [arguments]
@@ -388,12 +386,14 @@ pub enum OpCode<'s> {
 
 	Return {
 		result: &'s str
-	}
+	},
+	
+	NoOp
 }
 
 // TODO: Should we remove [crate::ast::parser::BinaryOperator] and use this
 // instead? Same goes for UnaryOperation and Operator.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum BinaryOperation {
 	Equal,
 	NotEqual,
@@ -405,7 +405,7 @@ pub enum BinaryOperation {
 	Subtract
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum UnaryOperation {
 	Not
 }

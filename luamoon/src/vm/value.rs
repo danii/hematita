@@ -103,12 +103,12 @@ impl Display for Value {
 impl Debug for Value {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		match self {
-			Self::Integer(integer) => write!(f, "{:?}", integer),
-			Self::String(string) => write!(f, "{:?}", string),
-			Self::Boolean(boolean) => write!(f, "{:?}", boolean),
-			Self::Table(table) => write!(f, "{:?}", table),
-			Self::Function(function) => write!(f, "{:?}", function),
-			Self::NativeFunction(function) => write!(f, "{:?}", function)
+			Self::Integer(integer) => Debug::fmt(integer, f),
+			Self::String(string) => Debug::fmt(string, f),
+			Self::Boolean(boolean) => Debug::fmt(boolean, f),
+			Self::Table(table) => Debug::fmt(table, f),
+			Self::Function(function) => Debug::fmt(function, f),
+			Self::NativeFunction(function) => function.fmt(f)
 		}
 	}
 }
@@ -296,7 +296,7 @@ impl Display for Table {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Function {
 	pub constants: Vec<Value>,
 	pub opcodes: Vec<OpCode<'static>>

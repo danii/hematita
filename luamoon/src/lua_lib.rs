@@ -1,16 +1,21 @@
 use self::super::vm::value::{Table, Value};
 use std::{collections::HashMap, iter::once, sync::{Arc, Mutex}};
+use itertools::Itertools;
 
 pub fn table_to_vector(table: &Table) -> Vec<Option<Value>> {
-	let lock = table.data.lock().unwrap();
-	let len = match lock.get(&Value::Integer(0)).unwrap() {
-		Value::Integer(len) => *len as usize,
-		_ => panic!()
-	};
+	let table = table.data.lock().unwrap();
+	let array = table.iter()
+		.filter_map(|(key, value)| if let Value::Integer(integer) = key
+			{Some((integer, value))} else {None})
+		.sorted_unstable_by(|(a, _), (b, _)| a.cmp(b));
 
-	(1..=len)
-		.map(|index| lock.get(&Value::Integer(index as i64)).map(Clone::clone))
-		.collect()
+	let vec = array.clone().collect::<Vec<_>>();
+	array.last()
+		.map(|(highest, _)| (1..=*highest)
+			.map(|index| vec.iter().find(|value| *value.0 == index)
+				.map(|value| value.1.clone()))
+			.collect::<Vec<_>>())
+		.unwrap_or_else(Vec::new)
 }
 
 /*
