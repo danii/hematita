@@ -72,6 +72,7 @@ impl<T> Lexer<T>
 			"not" => Token::KeywordNot,
 			"or" => Token::KeywordOr,
 			"repeat" => Token::KeywordRepeat,
+			"return" => Token::KeywordReturn,
 			"then" => Token::KeywordThen,
 			"until" => Token::KeywordUntil,
 			"while" => Token::KeywordWhile,
@@ -233,6 +234,7 @@ pub enum Token {
 	KeywordNot,
 	KeywordOr,
 	KeywordRepeat,
+	KeywordReturn,
 	KeywordThen,
 	KeywordUntil,
 	KeywordWhile
@@ -289,6 +291,7 @@ impl std::fmt::Display for Token {
 			Self::KeywordNot => write!(f, "not"),
 			Self::KeywordOr => write!(f, "or"),
 			Self::KeywordRepeat => write!(f, "repeat"),
+			Self::KeywordReturn => write!(f, "return"),
 			Self::KeywordThen => write!(f, "then"),
 			Self::KeywordUntil => write!(f, "until"),
 			Self::KeywordWhile => write!(f, "while")

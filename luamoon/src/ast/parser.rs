@@ -160,6 +160,22 @@ pub fn parse(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 			Some(Token::KeywordWhile | Token::KeywordRepeat) =>
 				statements.push(parse_while(iter)?),
 
+			// return
+			Some(Token::KeywordReturn) => {
+				iter.eat();
+
+				let mut values = Vec::new();
+				loop {
+					values.push(parse_expression(iter)?);
+					match iter.peek() {
+						Some(Token::Comma) => iter.eat(),
+						_ => break
+					}
+				}
+
+				statements.push(Statement::Return {values})
+			},
+
 			//Some(Token::KeywordEnd) | None => break Ok(Block(statements)),
 			_ => break Ok(Block(statements))
 			//Some(_) => break Err(Error(iter.next()))
@@ -589,6 +605,12 @@ pub enum Statement {
 		run_first: bool
 	},
 
+	/// Returns from a function.
+	Return {
+		/// The values to be returned.
+		values: Vec<Expression>
+	},
+
 	// El assignment
 
 	/// An assignment operator.
@@ -640,6 +662,13 @@ impl Display for Statement {
 				write!(f, "while {} do\n{}end", condition, block),
 			Self::While {condition, block, run_first: true} =>
 				write!(f, "repeat\n{}until {}", block, condition),
+
+			Self::Return {values} => {
+				write!(f, "return ")?;
+				values.iter().enumerate()
+					.try_for_each(|(index, value)| if index == 0 {write!(f, "{}", value)}
+						else {write!(f, ", {}", value)})
+			},
 			
 			// Assignment
 
@@ -813,14 +842,14 @@ impl Display for Expression {
 
 #[derive(Clone, Debug)]
 pub struct ElseIf {
-	condition: Expression,
-	then: Block
+	pub condition: Expression,
+	pub then: Block
 }
 
 #[derive(Clone, Debug)]
 pub struct KeyValue {
-	key: Expression,
-	value: Expression
+	pub key: Expression,
+	pub value: Expression
 }
 
 // TODO: Should we remove [crate::vm::BinaryOperation] and use this instead?

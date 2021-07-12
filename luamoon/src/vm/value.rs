@@ -1,5 +1,4 @@
-pub use self::NillableValue::{Nil, NonNil};
-use self::super::OpCode;
+pub use self::{super::Chunk, NillableValue::{Nil, NonNil}};
 use std::{
 	array::IntoIter as ArrayIntoIter,
 	borrow::Borrow,
@@ -273,6 +272,10 @@ impl Table {
 		Arc::new(self)
 	}
 
+	pub fn from_hashmap(data: HashMap<Value, Value>) -> Self {
+		Self {data: Mutex::new(data), metatable: None}
+	}
+
 	pub fn array<V, const N: usize>(data: [&NillableValue<V>; N]) -> Self
 			where V: Borrow<Value> {
 		let data = Mutex::new(ArrayIntoIter::new(data)
@@ -296,14 +299,25 @@ impl Display for Table {
 	}
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Debug)]
 pub struct Function {
-	pub constants: Vec<Value>,
-	pub opcodes: Vec<OpCode<'static>>
+	pub chunk: Arc<Chunk>
+}
+
+impl Function {
+	pub fn arc(self) -> Arc<Self> {
+		Arc::new(self)
+	}
 }
 
 impl Display for Function {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		write!(f, "function: {:p}", &self)
+	}
+}
+
+impl From<Chunk> for Function {
+	fn from(chunk: Chunk) -> Self {
+		Self {chunk: chunk.arc()}
 	}
 }

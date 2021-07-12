@@ -1,21 +1,24 @@
-pub mod bytecode;
+pub mod constant;
 pub mod value;
 
-use self::value::{Function, IntoNillableValue, Nil, NonNil, Table, Value};
+use self::{
+	constant::Constant,
+	value::{Function, IntoNillableValue, Nil, NonNil, Table, Value}
+};
 use if_chain::if_chain;
 use std::{collections::HashMap, sync::Arc};
 
 /// Executes a function.
 pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
-		global: &mut HashMap<Value, Value>) -> Result<Arc<Table>, String> {
+		global: Arc<Table>) -> Result<Arc<Table>, String> {
 	let mut index = 0; // The current opcode we're evaluating.
 	// current_opcode
 
 	loop {
-		if index == function.opcodes.len() {break Ok(Table::default().arc())}
+		if index == function.chunk.opcodes.len() {break Ok(Table::default().arc())}
 
-		match function.opcodes[index] {
-			OpCode::Call {arguments, function, ..} => {
+		match function.chunk.opcodes[index] {
+			OpCode::Call {arguments, function, destination, ..} => {
 				let args = match local.get(&Value::new_string(arguments)).nillable() {
 					NonNil(Value::Table(table)) => table,
 					// args is not a table.
@@ -32,10 +35,17 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 					NonNil(Value::Function(func)) => {
 						// TODO: Make locals and globals tables...
 						// TODO: Return...
-						execute(&**func, args.data.lock().unwrap().clone(), global)?;
+						let result = execute(&**func, args.data.lock().unwrap().clone(), global.clone())?;
+						let result = result.data.lock().unwrap();
+						
+						let destination = Value::new_string(destination);
+						match result.get(&Value::Integer(1)) {
+							Some(result) => {local.insert(destination, result.clone());},
+							None => {local.remove(&destination);}
+						}
 					},
 					// func is not a function.
-					func => break Err(format!("attempt to call a {} value", func.type_name()))
+					func => break Err(format!("attempt to call a {} value {:?}", func.type_name(), func))
 				}
 			},
 
@@ -71,10 +81,10 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 					let index = local.get(&Value::new_string(index))
 						.ok_or("table index is nil".to_owned())?; // index is nil.
 
-						// value is not nil.
-						if let Some(value) = local.get(&Value::new_string(value)) {
-							lock.insert(index.clone(), value.clone());
-						// value is nil.
+					// value is not nil.
+					if let Some(value) = local.get(&Value::new_string(value)) {
+						lock.insert(index.clone(), value.clone());
+					// value is nil.
 					} else {
 						lock.remove(index);
 					}
@@ -85,12 +95,12 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 			},
 
 			OpCode::Load {constant, destination, ..} =>
-					match function.constants.get(constant as usize).nillable().cloned() {
+					match function.chunk.constants.get(constant as usize) {
 				// constant is not nil.
-				NonNil(constant) =>
-					{local.insert(Value::new_string(destination), constant);},
+				Some(constant) => {local.insert(Value::new_string(destination),
+					constant.clone().into_value());},
 				// constant is.... nil?
-				Nil => {local.remove(&Value::new_string(destination));}
+				None => {local.remove(&Value::new_string(destination));}
 			},
 
 			OpCode::ReAssign {actor, destination, ..} => {
@@ -153,7 +163,7 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 											if let NonNil(second) = second.cloned()
 												{arguments.insert(Value::Integer(0), second);}
 											transfer_result = Some(execute(
-												&*metamethod, arguments, global)?);
+												&*metamethod, arguments, global.clone())?);
 											true
 										},
 										Value::NativeFunction(metamethod) => {
@@ -190,7 +200,7 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 											if let NonNil(second) = second.cloned()
 												{arguments.insert(Value::Integer(0), second);}
 											transfer_result = Some(execute(
-												&*metamethod, arguments, global)?);
+												&*metamethod, arguments, global.clone())?);
 											true
 										},
 										Value::NativeFunction(metamethod) => {
@@ -408,4 +418,16 @@ pub enum BinaryOperation {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum UnaryOperation {
 	Not
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct Chunk {
+	pub constants: Vec<Constant>,
+	pub opcodes: Vec<OpCode<'static>>
+}
+
+impl Chunk {
+	pub fn arc(self) -> Arc<Self> {
+		Arc::new(self)
+	}
 }

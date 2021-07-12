@@ -1,9 +1,4 @@
-use luamoon::{
-	ast::{lexer::Lexer, parser::{TokenIterator, parse}},
-	compiler::compile,
-	lua_lib::print,
-	vm::{value::Value, execute}
-};
+use luamoon::{ast::{lexer::Lexer, parser::{TokenIterator, parse}}, compiler::compile, lua_lib::print, vm::{execute, value::{Table, Value}}};
 use maplit::hashmap;
 use std::{env::args, fs::File, io::Read};
 
@@ -51,7 +46,17 @@ fn main() {
 					Value::NativeFunction(print),
 			};
 
-			match execute(&function, locals, &mut hashmap! {}) {
+			let globals = Table::from_hashmap(hashmap! {
+				Value::new_string("print") =>
+					Value::NativeFunction(print)
+			}).arc();
+
+			{
+				let mut data = globals.data.lock().unwrap();
+				data.insert(Value::new_string("_G"), Value::Table(globals.clone()));
+			}
+
+			match execute(&function.into(), locals, globals) {
 				Ok(_) => (),
 				Err(error) =>println!("ERROR: {}", error)
 			}
