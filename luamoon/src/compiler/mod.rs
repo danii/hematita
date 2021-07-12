@@ -267,7 +267,6 @@ impl Generator {
 				},
 
 				Statement::Function {name, arguments, body, local} => {
-					println!("{}:'{:?}'", name, body);
 					// TODO: Upvals
 					let function = compile_function(body, arguments);
 					let constant = self.constant(Constant::Chunk(function.arc()));

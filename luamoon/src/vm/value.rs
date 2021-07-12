@@ -17,7 +17,7 @@ pub enum Value {
 	Boolean(bool),
 	Table(Arc<Table>),
 	Function(Arc<Function>),
-	NativeFunction(fn(Arc<Table>) -> Arc<Table>)
+	NativeFunction(fn(Arc<Table>, Arc<Table>) -> Result<Arc<Table>, String>)
 }
 
 impl Value {

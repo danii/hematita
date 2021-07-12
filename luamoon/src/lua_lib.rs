@@ -1,5 +1,7 @@
-use self::super::vm::value::{Table, Value};
-use std::{collections::HashMap, iter::once, sync::{Arc, Mutex}};
+use crate::vm::value::IntoNillableValue;
+
+use self::super::vm::{value::{NillableValue::NonNil, Table, Value}, execute};
+use std::{collections::HashMap, sync::Arc};
 use itertools::Itertools;
 
 pub fn table_to_vector(table: &Table) -> Vec<Option<Value>> {
@@ -31,16 +33,46 @@ pub fn table_to_vector(table: Table) -> Vec<Value> {
 }
 */
 
-pub fn vector_to_table(vector: Vec<Value>) -> Table {
-	let len = vector.len();
-	let mut map = vector.into_iter().enumerate()
+pub fn vector_to_table(vector: Vec<Option<Value>>) -> HashMap<Value, Value> {
+	vector.into_iter().enumerate()
+		.filter_map(|(index, value)| value.map(|value| (index, value)))
 		.map(|(index, value)| (Value::Integer(index as i64 + 1), value))
-		.collect::<HashMap<_, _>>();
-	map.extend(once((Value::Integer(0), Value::Integer(len as i64))));
-	Table {data: Mutex::new(map), ..Default::default()}
+		.collect::<HashMap<_, _>>()
 }
 
-pub fn print(arguments: Arc<Table>) -> Arc<Table> {
+pub fn print(arguments: Arc<Table>, _: Arc<Table>)
+		-> Result<Arc<Table>, String> {
 	println!("{:?}", table_to_vector(&*arguments));
-	Arc::new(vector_to_table(Vec::new()))
+	Ok(Table::from_hashmap(vector_to_table(Vec::new())).arc())
+}
+
+pub fn pcall(arguments: Arc<Table>, global: Arc<Table>)
+		-> Result<Arc<Table>, String> {
+	let mut arguments = table_to_vector(&*arguments);
+	match arguments.remove(0).nillable() {
+		NonNil(Value::Function(function)) => {
+			let arguments = vector_to_table(arguments);
+			let result = match execute(&*function, arguments, global.clone()) {
+				Ok(result) => vec![
+					Some(Value::Boolean(true)),
+					Some(Value::Table(result))
+				],
+				Err(err) => vec![
+					Some(Value::Boolean(false)),
+					Some(Value::String(err.into_boxed_str()))
+				]
+			};
+
+			Ok(Table::from_hashmap(vector_to_table(result)).arc())
+		},
+		value => {
+			let result = format!("attempt to call a {} value", value.type_name());
+			let result = vec![
+				Some(Value::Boolean(false)),
+				Some(Value::String(result.into_boxed_str()))
+			];
+
+			Ok(Table::from_hashmap(vector_to_table(result)).arc())
+		}
+	}
 }

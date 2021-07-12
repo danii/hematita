@@ -2,7 +2,6 @@ function bag(print)
 	local value = {}
 
 	function ret(new)
-		print(b)
 		if new then
 			value = new
 		else
@@ -12,9 +11,12 @@ function bag(print)
 
 	local b = ":)"
 
+	print("Yo!")
 	return ret
 end
 
-local r = bag(print)
-print(r)
-r()
+function randomError()
+	iDontExist()
+end
+
+print(pcall(randomError))

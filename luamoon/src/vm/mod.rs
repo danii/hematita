@@ -14,12 +14,24 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 	let mut index = 0; // The current opcode we're evaluating.
 	// current_opcode
 
+	fn retrieve(key: &Value, local: &mut HashMap<Value, Value>,
+			global: &Arc<Table>) -> Option<Value> {
+		match local.get(key) {
+			Some(value) => Some(value.clone()),
+			None => {
+				let global = global.data.lock().unwrap();
+				global.get(key).cloned()
+			}
+		}
+	}
+
 	loop {
 		if index == function.chunk.opcodes.len() {break Ok(Table::default().arc())}
 
 		match function.chunk.opcodes[index] {
 			OpCode::Call {arguments, function, destination, ..} => {
-				let args = match local.get(&Value::new_string(arguments)).nillable() {
+				let args = match retrieve(&Value::new_string(arguments),
+						&mut local, &global).nillable() {
 					NonNil(Value::Table(table)) => table,
 					// args is not a table.
 					args => break Err(format!(
@@ -27,15 +39,21 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 							args.type_name()))
 				};
 
-				match local.get(&Value::new_string(function)).nillable() {
+				match retrieve(&Value::new_string(function),
+						&mut local, &global).nillable() {
 					NonNil(Value::NativeFunction(func)) => {
-						// TODO: Return...
-						func(args.clone());
+						let result = func(args.clone(), global.clone())?;
+						let result = result.data.lock().unwrap();
+						
+						let destination = Value::new_string(destination);
+						match result.get(&Value::Integer(1)) {
+							Some(result) => {local.insert(destination, result.clone());},
+							None => {local.remove(&destination);}
+						}
 					},
 					NonNil(Value::Function(func)) => {
 						// TODO: Make locals and globals tables...
-						// TODO: Return...
-						let result = execute(&**func, args.data.lock().unwrap().clone(), global.clone())?;
+						let result = execute(&func, args.data.lock().unwrap().clone(), global.clone())?;
 						let result = result.data.lock().unwrap();
 						
 						let destination = Value::new_string(destination);
@@ -45,18 +63,19 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 						}
 					},
 					// func is not a function.
-					func => break Err(format!("attempt to call a {} value {:?}", func.type_name(), func))
+					func => break Err(format!("attempt to call a {} value", func.type_name()))
 				}
 			},
 
 			OpCode::IndexRead {indexee, index, destination, ..} =>
-					match local.get(&Value::new_string(indexee)).nillable() {
+					match retrieve(&Value::new_string(indexee), &mut local, &global)
+						.nillable() {
 				// indexee is a table.
 				NonNil(Value::Table(table)) => {
-					let index = local.get(&Value::new_string(index))
+					let index = retrieve(&Value::new_string(index), &mut local, &global)
 						.ok_or("table index is nil".to_owned())?; // table index is nil.
 					let table = table.data.lock().unwrap();
-					let value = table.get(index).map(Clone::clone);
+					let value = table.get(&index).map(Clone::clone);
 					drop(table); // Borrow checker stuff.
 
 					let destination = Value::new_string(destination);
@@ -74,19 +93,21 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 			},
 
 			OpCode::IndexWrite {indexee, index, value} =>
-					match local.get(&Value::new_string(indexee)).nillable() {
+					match retrieve(&Value::new_string(indexee), &mut local, &global)
+						.nillable() {
 				// indexee is a table.
 				NonNil(Value::Table(table)) => {
 					let mut lock = table.data.lock().unwrap();
-					let index = local.get(&Value::new_string(index))
+					let index = retrieve(&Value::new_string(index), &mut local, &global)
 						.ok_or("table index is nil".to_owned())?; // index is nil.
 
 					// value is not nil.
-					if let Some(value) = local.get(&Value::new_string(value)) {
+					if let Some(value) = retrieve(&Value::new_string(value),
+							&mut local, &global) {
 						lock.insert(index.clone(), value.clone());
 					// value is nil.
 					} else {
-						lock.remove(index);
+						lock.remove(&index);
 					}
 				},
 				// indexee is not a table.
@@ -104,8 +125,8 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 			},
 
 			OpCode::ReAssign {actor, destination, ..} => {
-				let actor = local.get(&Value::new_string(actor));
-				match local.get(&actor.unwrap()).nillable() {
+				let actor = retrieve(&Value::new_string(actor), &mut local, &global);
+				match retrieve(&actor.unwrap(), &mut local, &global).nillable() {
 					NonNil(value) => {
 						let value = value.clone();
 						local.insert(Value::new_string(destination), value);
@@ -119,8 +140,10 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 					Value::Table(Arc::default()));},
 
 			OpCode::BinaryOperation {first, second, destination, operation, ..} => {
-				let first = local.get(&Value::new_string(first)).nillable();
-				let second = local.get(&Value::new_string(second)).nillable();
+				let first = retrieve(&Value::new_string(first),
+					&mut local, &global).nillable();
+				let second = retrieve(&Value::new_string(second),
+					&mut local, &global).nillable();
 				let destination = Value::new_string(destination);
 
 				// Uneeded when 53667 and 51114.
@@ -167,8 +190,8 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 											true
 										},
 										Value::NativeFunction(metamethod) => {
-											transfer_result = Some(metamethod(
-												Table::array([&first, &second]).arc()));
+											transfer_result = Some(metamethod(Table::array(
+												[&first, &second]).arc(), global.clone())?);
 											true
 										},
 										_ => false
@@ -204,8 +227,8 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 											true
 										},
 										Value::NativeFunction(metamethod) => {
-											transfer_result = Some(metamethod(
-												Table::array([&first, &second]).arc()));
+											transfer_result = Some(metamethod(Table::array(
+												[&first, &second]).arc(), global.clone())?);
 											true
 										},
 										_ => false
@@ -235,7 +258,8 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 			},
 
 			OpCode::UnaryOperation {operand, operation, destination, ..} => {
-				let operand = local.get(&Value::new_string(operand)).nillable();
+				let operand = retrieve(&Value::new_string(operand),
+					&mut local, &global).nillable();
 				let destination = Value::new_string(destination);
 
 				let result = match operation {
@@ -251,15 +275,15 @@ pub fn execute(function: &Function, mut local: HashMap<Value, Value>,
 			},
 
 			OpCode::Jump {operation, r#if: Some(check)} => {
-				let check = local.get(&Value::new_string(check));
+				let check = retrieve(&Value::new_string(check), &mut local, &global);
 				if check.nillable().coerce_to_bool() {
 					index = operation as usize;
 					continue
 				}
 			},
 
-			OpCode::Return {result} => match local.get(
-					&Value::new_string(result)).nillable() {
+			OpCode::Return {result} => match retrieve(
+					&Value::new_string(result), &mut local, &global).nillable() {
 				NonNil(Value::Table(result)) => break Ok(result.clone()),
 				_ => panic!()
 			},
