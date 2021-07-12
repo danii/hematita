@@ -1,4 +1,4 @@
-use luamoon::{
+use lua_hematita::{
 	ast::{lexer::Lexer, parser::{TokenIterator, parse}},
 	compiler::compile,
 	lua_lib::{pcall, print},

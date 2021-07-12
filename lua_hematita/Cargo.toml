@@ -1,9 +1,10 @@
 [package]
-name = "playground"
+name = "lua_hematita"
 version = "0.1.0"
 edition = "2018"
 authors = ["Daniel Conley <himself@danii.dev>"]
 
 [dependencies]
-lua_hematita = {path = "../lua_hematita"}
+itertools = "0.10.1"
+if_chain = "1.0.1"
 maplit = "1.0.2"
