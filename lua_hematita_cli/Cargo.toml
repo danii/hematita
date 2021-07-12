@@ -1,10 +1,9 @@
 [package]
-name = "luamoon"
+name = "lua_hematita_cli"
 version = "0.1.0"
 edition = "2018"
 authors = ["Daniel Conley <himself@danii.dev>"]
 
 [dependencies]
-itertools = "0.10.1"
-if_chain = "1.0.1"
+lua_hematita = {path = "../lua_hematita"}
 maplit = "1.0.2"

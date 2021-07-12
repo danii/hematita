@@ -1,5 +1,5 @@
 [workspace]
 members = [
 	"lua_hematita",
-	"playground"
+	"lua_hematita_cli"
 ]
