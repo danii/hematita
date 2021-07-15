@@ -1,12 +1,27 @@
-function bag()
-	local value = {a = 5, 4}
-	print(value.a)
+function deepUpValue()
+	local value = {}
 	return function()
 		return function()
-			return value
+			return function()
+				print(type(value))
+			end
 		end
 	end
 end
 
-print(bag()()())
 
+deepUpValue()()()()
+
+function bag()
+	local value = {}
+	return function(new)
+		local old = value
+		value = new
+		return old
+	end
+end
+
+local b = bag()
+print(type(b("A")))
+print(b("B"))
+print(b("C"))

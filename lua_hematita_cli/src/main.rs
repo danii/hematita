@@ -1,7 +1,7 @@
 use lua_hematita::{
 	ast::{lexer::Lexer, parser::{TokenIterator, parse}},
 	compiler::compile,
-	lua_lib::{print},
+	lua_lib::{print, r#type},
 	vm::{VirtualMachine, value::{Table, Value}}
 };
 use maplit::hashmap;
@@ -48,7 +48,9 @@ fn main() {
 
 			let globals = Table::from_hashmap(hashmap! {
 				Value::new_string("print") =>
-					Value::NativeFunction(print)/*,
+					Value::NativeFunction(print),
+				Value::new_string("type") =>
+					Value::NativeFunction(r#type)/*,
 				Value::new_string("pcall") =>
 					Value::NativeFunction(pcall)*/
 			}).arc();

@@ -122,8 +122,12 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 								NonNil(Value::Table(self.virtual_machine.execute(&*function)?)));*/
 						},
 			
-						NonNil(Value::NativeFunction(function)) =>
-							{function(arguments, Table::default().arc())?;},
+						NonNil(Value::NativeFunction(function)) => {
+							let result = function(arguments, Table::default().arc())?;
+							// TODO: Returning tuples.
+							let result = result.data.lock().unwrap();
+							self.write_reference(destination, result.get(&Value::Integer(1)).nillable().cloned());
+						},
 			
 						function => break Err(format!("attempt to call a {} value",
 							function.type_name()))

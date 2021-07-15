@@ -95,3 +95,11 @@ pub fn getmetatable(arguments: Arc<Table>) -> Result<Arc<Table>, String> {
 		_ => vector_to_table(vec![])
 	}).arc())
 }
+
+pub fn r#type(arguments: Arc<Table>, _: Arc<Table>)
+		-> Result<Arc<Table>, String> {
+	let arguments = table_to_vector(&arguments);
+	let r#type = arguments.get(0).cloned().flatten().nillable().type_name();
+	let result = vec![Some(Value::String(r#type.to_owned().into_boxed_str()))];
+	Ok(Table::from_hashmap(vector_to_table(result)).arc())
+}
