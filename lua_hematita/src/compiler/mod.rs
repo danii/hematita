@@ -11,7 +11,7 @@ pub fn compile(block: &Block) -> Chunk {
 }
 
 pub fn compile_function(block: &Block, arguments: &Vec<String>,
-		up_values: HashMap<String, usize>) -> Chunk {
+		up_values: HashMap<String, (usize, bool)>) -> Chunk {
 	let mut compiler = Generator {up_values, ..Generator::new()};
 	compiler.compile_function_header(arguments);
 	compiler.compile(&block);
@@ -49,7 +49,7 @@ struct Generator {
 	constants: Vec<Constant>,
 	opcodes: Vec<OpCode<'static>>,
 
-	up_values: HashMap<String, usize>,
+	up_values: HashMap<String, (usize, bool)>,
 
 	// TODO: currently only written to
 	registers: Vec<Option<Option<KnownValue>>>,
@@ -81,10 +81,24 @@ impl Generator {
 
 		let registers = registers.len() + 1; // 0th register is always arguments.
 
-		let up_values = (0..=up_values.values().cloned().max().unwrap_or(0))
+		let up_values =
+			(0..up_values.values().filter_map(|&(a, b)| (!b).then(|| a))
+				.max().map(|v| v + 1).unwrap_or(0)).map(|a| (a, false))
+			.chain((0..up_values.values().filter_map(|&(a, b)| b.then(|| a))
+				.max().map(|v| v + 1).unwrap_or(0)).map(|a| (a, true)))
 			.collect::<Vec<_>>();
 
 		Chunk {constants, opcodes, registers, up_values}
+	}
+
+	fn up_value_id(&self, (up_value, use_up_value): (usize, bool)) -> usize {
+		match use_up_value {
+			true => up_value + self.up_values.values()
+				.filter_map(|(up_value, use_up_value)|
+					(!use_up_value).then(|| *up_value))
+				.max().unwrap_or(0),
+			false => up_value
+		}
 	}
 
 	fn compile(&mut self, block: &Block) {
@@ -243,11 +257,11 @@ impl Generator {
 								};
 
 								self.opcodes.push(OpCode::LoadConst {constant, register});
-								self.opcodes.push(OpCode::SaveUpValue {register, up_value});
+								self.opcodes.push(OpCode::SaveUpValue {register, up_value: self.up_value_id(up_value)});
 							},
 							(CompileResult::WroteToRegister(register),
 									None, None, Some(&up_value)) =>
-								self.opcodes.push(OpCode::SaveUpValue {register, up_value}),
+								self.opcodes.push(OpCode::SaveUpValue {register, up_value: self.up_value_id(up_value)}),
 							(CompileResult::Evaluated(value), None, None, None) => {
 								let global = Box::leak(identifier.clone().into_boxed_str());
 								let register = self.register();
@@ -296,7 +310,11 @@ impl Generator {
 					{self.compile_call(function, &arguments);},
 
 				Statement::Function {name, arguments, body, local} => {
-					let up_values = self.variables_to_registers.clone();
+					let up_values = self.variables_to_registers.iter()
+						.map(|(key, &value)| (key.clone(), (value, false)))
+						.chain(self.up_values.iter()
+							.map(|(key, &(value, _))| (key.clone(), (value, true))))
+						.collect();
 					let function = compile_function(body, arguments, up_values);
 					let constant = self.constant(Constant::Chunk(function.arc()));
 					
@@ -335,7 +353,7 @@ impl Generator {
 					None => match self.up_values.get(identifier) {
 						Some(&up_value) => {
 							let register = self.register();
-							self.opcodes.push(OpCode::LoadUpValue {up_value, register});
+							self.opcodes.push(OpCode::LoadUpValue {up_value: self.up_value_id(up_value), register});
 							CompileResult::WroteToRegister(register)
 						},
 						// Otherwise, load from global scope.
@@ -393,7 +411,11 @@ impl Generator {
 			Expression::Function {arguments, body} => {
 				// We need to realize all values...
 
-				let up_values = self.variables_to_registers.clone();
+				let up_values = self.variables_to_registers.iter()
+					.map(|(key, &value)| (key.clone(), (value, false)))
+					.chain(self.up_values.iter()
+						.map(|(key, &(value, _))| (key.clone(), (value, true))))
+					.collect();
 				let function = compile_function(body, arguments, up_values);
 				let constant = self.constant(Constant::Chunk(function.arc()));
 				let destination = self.register();

@@ -36,7 +36,7 @@ fn main() {
 				Err(error) => return println!("SYNTAX ERROR: {}", error)
 			};
 
-			println!("{:#?}", function)
+			println!("{}", function)
 		},
 		"run" => {
 			let tokens = Lexer {source: code.chars().peekable()};

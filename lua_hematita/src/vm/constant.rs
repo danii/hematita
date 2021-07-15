@@ -1,5 +1,5 @@
 use self::super::Chunk;
-use std::sync::Arc;
+use std::{fmt::{Display, Formatter, Result as FMTResult}, sync::Arc};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Constant {
@@ -7,6 +7,17 @@ pub enum Constant {
 	Integer(i64),
 	Boolean(bool),
 	Chunk(Arc<Chunk>)
+}
+
+impl Display for Constant {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		match self {
+			Self::String(string) => write!(f, "{:?}", string),
+			Self::Integer(integer) => write!(f, "{}", integer),
+			Self::Boolean(boolean) => write!(f, "{}", boolean),
+			Self::Chunk(chunk) => write!(f, "{}", chunk)
+		}
+	}
 }
 
 impl From<KnownValue> for Constant {

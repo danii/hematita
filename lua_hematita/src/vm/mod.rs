@@ -5,7 +5,7 @@ use self::{
 	constant::Constant,
 	value::{Function, IntoNillableValue, MaybeUpValue, NillableValue, Nil, NonNil, Table, Value}
 };
-use std::sync::Arc;
+use std::{fmt::{Display, Formatter, Result as FMTResult}, sync::Arc};
 
 #[derive(Clone, Copy)]
 enum Reference<'s> {
@@ -125,8 +125,8 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 						NonNil(Value::NativeFunction(function)) =>
 							{function(arguments, Table::default().arc())?;},
 			
-						function => break Err(format!("attempt to call a {} value {:?}",
-							function.type_name(), function))
+						function => break Err(format!("attempt to call a {} value",
+							function.type_name()))
 					}
 				},
 
@@ -336,7 +336,10 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 						Some(Constant::Boolean(boolean)) => NonNil(Value::Boolean(boolean)),
 						Some(Constant::Chunk(chunk)) => {
 							let up_values = chunk.up_values.iter()
-								.map(|&up_value| self.registers[up_value].up_value().clone())
+								.map(|(up_value, use_up_value)| match use_up_value {
+									true => self.function.up_values[*up_value].clone(),
+									false => self.registers[*up_value].up_value().clone()
+								})
 								.collect::<Vec<_>>().into_boxed_slice();
 							NonNil(Value::Function(Function {up_values, chunk}.arc()))
 						},
@@ -552,6 +555,45 @@ pub enum OpCode<'s> {
 	NoOp
 }
 
+impl<'s> Display for OpCode<'s> {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		match self {
+			Self::Call {function, arguments, destination} =>
+				write!(f, "call {} {} {}", function, arguments, destination),
+			Self::IndexRead {indexee, index, destination} =>
+				write!(f, "idxr {} {} {}", indexee, index, destination),
+			Self::IndexWrite {indexee, index, value} =>
+				write!(f, "idxw {} {} {}", indexee, index, value),
+			Self::Create {destination} =>
+				write!(f, "crt {}", destination),
+			Self::BinaryOperation {..} =>
+				write!(f, "biop"),
+			Self::UnaryOperation {..} =>
+				write!(f, "unop"),
+			Self::Jump {operation, r#if: None} =>
+				write!(f, "jmp {}", operation),
+			Self::Jump {operation, r#if: Some(r#if)} =>
+				write!(f, "cjmp {} {}", operation, r#if),
+			Self::Return {result} =>
+				write!(f, "ret {}", result),
+			Self::ReAssign {actor, destination} =>
+				write!(f, "reas {} {}", actor, destination),
+			Self::LoadConst {constant, register} =>
+				write!(f, "lcst <{}> {}", constant, register),
+			Self::LoadGlobal {global, register} =>
+				write!(f, "lglb ({}) {}", global, register),
+			Self::SaveGlobal {register, global} =>
+				write!(f, "sglb {} ({})", register, global),
+			Self::LoadUpValue {up_value, register} =>
+				write!(f, "luv [{}] {}", up_value, register),
+			Self::SaveUpValue {register, up_value} =>
+				write!(f, "suv {} [{}]", register, up_value),
+			Self::NoOp =>
+				write!(f, "noop")
+		}
+	}
+}
+
 // TODO: Should we remove [crate::ast::parser::BinaryOperator] and use this
 // instead? Same goes for UnaryOperation and Operator.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -574,7 +616,7 @@ pub enum UnaryOperation {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Chunk {
 	pub registers: usize,
-	pub up_values: Vec<usize>,
+	pub up_values: Vec<(usize, bool)>,
 	pub constants: Vec<Constant>,
 	pub opcodes: Vec<OpCode<'static>>
 }
@@ -582,5 +624,22 @@ pub struct Chunk {
 impl Chunk {
 	pub fn arc(self) -> Arc<Self> {
 		Arc::new(self)
+	}
+}
+
+impl Display for Chunk {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		write!(f, "registers: {}\nconstants:\n", self.registers)?;
+		self.constants.iter().enumerate()
+			.try_for_each(|(index, constant)| {
+				if index != 0 {write!(f, "\n")?}
+				write!(f, "\t{}: ", index)?; constant.fmt(f)
+			})?;
+		write!(f, "\n")?;
+		self.opcodes.iter().enumerate()
+			.try_for_each(|(index, opcode)| {
+				if index != 0 {write!(f, "\n")?}
+				write!(f, "{}: ", index)?; opcode.fmt(f)
+			})
 	}
 }

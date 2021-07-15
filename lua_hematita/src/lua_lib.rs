@@ -1,4 +1,4 @@
-use self::super::vm::value::{Table, Value};
+use self::super::vm::value::{IntoNillableValue, Table, Value};
 use std::{collections::HashMap, sync::Arc};
 use itertools::Itertools;
 
@@ -40,7 +40,10 @@ pub fn vector_to_table(vector: Vec<Option<Value>>) -> HashMap<Value, Value> {
 
 pub fn print(arguments: Arc<Table>, _: Arc<Table>)
 		-> Result<Arc<Table>, String> {
-	println!("{:?}", table_to_vector(&*arguments));
+	let message = table_to_vector(&*arguments).into_iter()
+		.map(|argument| format!("{}", argument.nillable()))
+		.join("\t");
+	println!("{}", message);
 	Ok(Table::from_hashmap(vector_to_table(Vec::new())).arc())
 }
 
