@@ -1,4 +1,4 @@
-use self::super::{value::{Function, Value}, Chunk};
+use self::super::Chunk;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -7,17 +7,6 @@ pub enum Constant {
 	Integer(i64),
 	Boolean(bool),
 	Chunk(Arc<Chunk>)
-}
-
-impl Constant {
-	pub fn into_value(self) -> Value {
-		match self {
-			Self::String(string) => Value::String(string.into_boxed_str()),
-			Self::Integer(integer) => Value::Integer(integer),
-			Self::Boolean(boolean) => Value::Boolean(boolean),
-			Self::Chunk(chunk) => Value::Function(Function {chunk}.arc())
-		}
-	}
 }
 
 impl From<KnownValue> for Constant {

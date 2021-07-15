@@ -261,6 +261,34 @@ impl<T, V> IntoNillableValue<V> for T
 	}
 }
 
+#[derive(Clone, Debug)]
+pub enum MaybeUpValue {
+	UpValue(Arc<Mutex<NillableValue<Value>>>),
+	Normal(NillableValue<Value>)
+}
+
+impl MaybeUpValue {
+	pub fn up_value(&mut self) -> &Arc<Mutex<NillableValue<Value>>> {
+		match self {
+			Self::UpValue(up_value) => up_value,
+			Self::Normal(normal) => {
+				let normal = Arc::new(Mutex::new(std::mem::replace(normal, Nil)));
+				*self = Self::UpValue(normal);
+				match self {
+					Self::UpValue(up_value) => up_value,
+					_ => unreachable!()
+				}
+			}
+		}
+	}
+}
+
+impl Default for MaybeUpValue {
+	fn default() -> Self {
+		Self::Normal(Nil)
+	}
+}
+
 #[derive(Debug, Default)]
 pub struct Table {
 	pub data: Mutex<HashMap<Value, Value>>,
@@ -301,6 +329,7 @@ impl Display for Table {
 
 #[derive(Debug)]
 pub struct Function {
+	pub up_values: Box<[Arc<Mutex<NillableValue<Value>>>]>,
 	pub chunk: Arc<Chunk>
 }
 
@@ -318,6 +347,6 @@ impl Display for Function {
 
 impl From<Chunk> for Function {
 	fn from(chunk: Chunk) -> Self {
-		Self {chunk: chunk.arc()}
+		Self {chunk: chunk.arc(), up_values: vec![].into_boxed_slice()}
 	}
 }

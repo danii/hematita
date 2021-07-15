@@ -1,22 +1,12 @@
-function bag(print)
-	local value = {}
-
-	function ret(new)
-		if new then
-			value = new
-		else
+function bag()
+	local value = {a = 5, 4}
+	print(value.a)
+	return function()
+		return function()
 			return value
 		end
 	end
-
-	local b = ":)"
-
-	print("Yo!")
-	return ret
 end
 
-function randomError()
-	iDontExist()
-end
+print(bag()()())
 
-print(pcall(randomError))

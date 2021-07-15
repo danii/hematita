@@ -114,13 +114,13 @@ impl<T> Lexer<T>
 		let mut number = String::new();
 
 		loop {
-			match self.peek()? {
-				'-' => if number.len() == 0 {
+			match self.peek() {
+				Some('-') => if number.len() == 0 {
 					number.push(self.peeked_next())
 				} else {
 					todo!()
 				},
-				'0'..='9' => number.push(self.peeked_next()),
+				Some('0'..='9') => number.push(self.peeked_next()),
 				_ => break
 			}
 		}

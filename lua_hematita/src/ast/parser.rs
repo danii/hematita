@@ -336,7 +336,7 @@ pub fn parse_table(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 
 			// actor
 			Some(Token::Identifier(_)) => {
-				let key = Expression::Identifier(iter.identifier());
+				let key = Expression::String(iter.identifier());
 
 				match iter.next() {
 					// actor,

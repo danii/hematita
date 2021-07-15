@@ -1,8 +1,8 @@
 use lua_hematita::{
 	ast::{lexer::Lexer, parser::{TokenIterator, parse}},
 	compiler::compile,
-	lua_lib::{pcall, print},
-	vm::{execute, value::{Table, Value}}
+	lua_lib::{print},
+	vm::{VirtualMachine, value::{Table, Value}}
 };
 use maplit::hashmap;
 use std::{env::args, fs::File, io::Read};
@@ -46,16 +46,11 @@ fn main() {
 				Err(error) => return println!("SYNTAX ERROR: {}", error)
 			};
 
-			let locals = hashmap! {
-				Value::String("print".to_owned().into_boxed_str()) =>
-					Value::NativeFunction(print),
-			};
-
 			let globals = Table::from_hashmap(hashmap! {
 				Value::new_string("print") =>
-					Value::NativeFunction(print),
+					Value::NativeFunction(print)/*,
 				Value::new_string("pcall") =>
-					Value::NativeFunction(pcall)
+					Value::NativeFunction(pcall)*/
 			}).arc();
 
 			{
@@ -63,7 +58,9 @@ fn main() {
 				data.insert(Value::new_string("_G"), Value::Table(globals.clone()));
 			}
 
-			match execute(&function.into(), locals, globals) {
+			let arguments = Table::default().arc();
+
+			match VirtualMachine::new(globals).execute(&function.into(), arguments) {
 				Ok(_) => (),
 				Err(error) => println!("ERROR: {}", error)
 			}

@@ -2,7 +2,7 @@ use self::super::{
 	ast::parser::{Block, Expression, KeyValue, Statement},
 	vm::{constant::{Constant, KnownValue}, Chunk, OpCode, UnaryOperation}
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 pub fn compile(block: &Block) -> Chunk {
 	let mut compiler = Generator::new();
@@ -10,8 +10,9 @@ pub fn compile(block: &Block) -> Chunk {
 	compiler.finish()
 }
 
-pub fn compile_function(block: &Block, arguments: &Vec<String>) -> Chunk {
-	let mut compiler = Generator::new();
+pub fn compile_function(block: &Block, arguments: &Vec<String>,
+		up_values: HashMap<String, usize>) -> Chunk {
+	let mut compiler = Generator {up_values, ..Generator::new()};
 	compiler.compile_function_header(arguments);
 	compiler.compile(&block);
 	compiler.finish()
@@ -20,81 +21,40 @@ pub fn compile_function(block: &Block, arguments: &Vec<String>) -> Chunk {
 #[derive(Debug)]
 enum CompileResult {
 	Evaluated(Option<KnownValue>),
-	WroteToVariable(String),
-	WroteToTemporary(Temporary)
-}
-
-enum Name {
-	Identifier(&'static str),
-	Temporary(Temporary)
-}
-
-impl Name {
-	fn free(self, compiler: &mut Generator) {
-		if let Self::Temporary(temporary) = self {temporary.free(compiler)}
-	}
-}
-
-impl std::ops::Deref for Name {
-	type Target = &'static str;
-
-	fn deref(&self) -> &&'static str {
-		match self {
-			Self::Identifier(id) => &id,
-			Self::Temporary(tmp) => &**tmp
-		}
-	}
+	WroteToRegister(usize)
 }
 
 impl CompileResult {
-	fn to(self, compiler: &mut Generator) -> Name {
+	fn to(self, compiler: &mut Generator) -> usize {
 		match self {
 			Self::Evaluated(Some(evaluated)) => {
-				let temporary = compiler.temporary();
+				let destination = compiler.register();
 				let constant = compiler.constant(evaluated.into());
-				compiler.opcodes.push(OpCode::Load {constant,
-					destination: *temporary, destination_local: true});
-
-				Name::Temporary(temporary)
+				compiler.opcodes.push(OpCode::LoadConst {constant, register: destination});
+				destination
 			},
 			Self::Evaluated(None) => {
-				let temporary = compiler.temporary();
-				compiler.opcodes.push(OpCode::Load {constant: u16::MAX,
-					destination: *temporary, destination_local: true});
-
-				Name::Temporary(temporary)
+				let destination = compiler.register();
+				compiler.opcodes.push(OpCode::LoadConst {
+					constant: u16::MAX, register: destination});
+				destination
 			},
-			Self::WroteToTemporary(temporary) =>
-				Name::Temporary(temporary),
-			Self::WroteToVariable(variable) =>
-				Name::Identifier(Box::leak(variable.into_boxed_str()))
+			Self::WroteToRegister(register) => register
 		}
 	}
 }
 
 #[derive(Debug)]
-struct Temporary(&'static str, usize);
-
-impl Temporary {
-	fn free(self, generator: &mut Generator) {
-		generator.temporaries.remove(&self.1);
-	}
-}
-
-impl std::ops::Deref for Temporary {
-	type Target = &'static str;
-
-	fn deref(&self) -> &&'static str {
-		&self.0
-	}
-}
-
-#[derive(Default)]
 struct Generator {
 	constants: Vec<Constant>,
 	opcodes: Vec<OpCode<'static>>,
-	temporaries: HashSet<usize>,
-	known_values: HashMap<KnownValue, Option<KnownValue>>
+
+	up_values: HashMap<String, usize>,
+
+	// TODO: currently only written to
+	registers: Vec<Option<Option<KnownValue>>>,
+	evaluated_variables: HashMap<String, Option<KnownValue>>,
+	variables_to_registers: HashMap<String, usize>
 }
 
 impl Generator {
@@ -102,13 +62,9 @@ impl Generator {
 		Self::default()
 	}
 
-	fn temporary(&mut self) -> Temporary {
-		let id = (0..)
-			.find(|temporary| matches!(self.temporaries.get(temporary), None))
-			.unwrap();
-		self.temporaries.insert(id);
-
-		Temporary(Box::leak(format!("(t{}", id).into_boxed_str()), id)
+	fn register(&mut self) -> usize {
+		self.registers.push(None);
+		self.registers.len() - 1
 	}
 
 	fn constant(&mut self, value: Constant) -> u16 {
@@ -121,8 +77,14 @@ impl Generator {
 	}
 
 	fn finish(self) -> Chunk {
-		let Self {constants, opcodes, ..} = self;
-		Chunk {constants, opcodes}
+		let Self {constants, opcodes, registers, up_values, ..} = self;
+
+		let registers = registers.len() + 1; // 0th register is always arguments.
+
+		let up_values = (0..=up_values.values().cloned().max().unwrap_or(0))
+			.collect::<Vec<_>>();
+
+		Chunk {constants, opcodes, registers, up_values}
 	}
 
 	fn compile(&mut self, block: &Block) {
@@ -136,168 +98,260 @@ impl Generator {
 				// Control
 
 				// TODO: else_ifs
-				Statement::If {condition, then, r#else, ..} => {
-					// TODO: Kinda clunky?..
-					let handle_wrote = |this: &mut Generator, variable| {
-						match r#else {
-							Some(r#else) => {
-								// Jump If local To 'then
-								// Block r#else
-								// Jump To 'done
-								// 'then
-								// Block then
-								// 'done
-
-								let jump_then = this.opcodes.len();
-								this.opcodes.push(OpCode::NoOp);
-								this.compile(r#else);
-								let jump_done = this.opcodes.len();
-								this.opcodes.push(OpCode::NoOp);
-
-								this.opcodes[jump_then] = OpCode::Jump {
-									r#if: Some(variable),
-									operation: this.opcodes.len() as u64
-								};
-								this.compile(then);
-								this.opcodes[jump_done] = OpCode::Jump {
-									r#if: None,
-									operation: this.opcodes.len() as u64
-								};
-							},
-							None => {
-								// UnaryOperation not local To local
-								// Jump If local To 'skip
-								// Block then
-								// 'skip
-
-								this.opcodes.push(OpCode::UnaryOperation {
-									operand: variable,
-									operation: UnaryOperation::Not,
-									destination: variable,
-									local: false
-								});
-								let jump = this.opcodes.len();
-								this.opcodes.push(OpCode::NoOp);
-								this.compile(then);
-
-								this.opcodes[jump] = OpCode::Jump {
-									r#if: Some(variable),
-									operation: this.opcodes.len() as u64
-								};
-							}
+				Statement::If {condition, then, r#else, ..} =>
+						match self.compile_expression(condition) {
+					// We know what condition is now.
+					CompileResult::Evaluated(result) => {
+						if result.map(KnownValue::coerce_to_bool).unwrap_or(false) {
+							// If the condition is known to be true, we can skip compiling
+							// any other block except then.
+							self.compile(then);
+						} else if let Some(r#else) = r#else {
+							// Or, if it's known to be false, we can do the same thing but
+							// with r#else...
+							self.compile(r#else);
 						}
-					};
+					},
+					// We don't know what condition is.
+					CompileResult::WroteToRegister(variable) => match r#else {
+						Some(r#else) => {
+							// Jump If local To 'then
+							// Block r#else
+							// Jump To 'done
+							// 'then
+							// Block then
+							// 'done
 
-					match self.compile_expression(condition, None) {
-						// We know what condition is now.
-						CompileResult::Evaluated(result) => {
-							if result.map(KnownValue::coerce_to_bool).unwrap_or(false) {
-								// If the condition is known to be true, we can skip compiling
-								// any other block except then.
-								self.compile(then);
-							} else if let Some(r#else) = r#else {
-								// Or, if it's known to be false, we can do the same thing but
-								// with r#else...
-								self.compile(r#else);
-							}
+							let jump_then = self.opcodes.len();
+							self.opcodes.push(OpCode::NoOp);
+							self.compile(r#else);
+							let jump_done = self.opcodes.len();
+							self.opcodes.push(OpCode::NoOp);
+
+							self.opcodes[jump_then] = OpCode::Jump {
+								r#if: Some(variable),
+								operation: self.opcodes.len() as u64
+							};
+							self.compile(then);
+							self.opcodes[jump_done] = OpCode::Jump {
+								r#if: None,
+								operation: self.opcodes.len() as u64
+							};
 						},
-						// We don't know what condition is.
-						CompileResult::WroteToVariable(variable) =>
-							handle_wrote(self, Box::leak(variable.into_boxed_str())),
-						CompileResult::WroteToTemporary(variable) => {
-							handle_wrote(self, *variable);
-							variable.free(self)
+						None => {
+							// UnaryOperation not local To local
+							// Jump If local To 'skip
+							// Block then
+							// 'skip
+
+							self.opcodes.push(OpCode::UnaryOperation {
+								operand: variable,
+								operation: UnaryOperation::Not,
+								destination: variable
+							});
+							let jump = self.opcodes.len();
+							self.opcodes.push(OpCode::NoOp);
+							self.compile(then);
+
+							self.opcodes[jump] = OpCode::Jump {
+								r#if: Some(variable),
+								operation: self.opcodes.len() as u64
+							};
 						}
 					}
 				},
 
-				Statement::Return {values} => {
-					let destination = self.temporary();
+				Statement::GenericFor {..} => todo!(),
 
-					self.opcodes.push(OpCode::Create {
-						destination: *destination, destination_local: true});
+				Statement::NumericFor {..} => todo!(),
+
+				Statement::While {..} => todo!(),
+
+				Statement::Return {values} => {
+					let destination = self.register();
+					self.opcodes.push(OpCode::Create {destination});
 					values.iter().enumerate().for_each(|(index, value)| {
 						let index = self.constant(Constant::Integer(index as i64 + 1));
-						let index_temporary = self.temporary();
-						let variable = self.compile_expression(value, None).to(self);
+						let index_register = self.register();
+						let variable = self.compile_expression(value).to(self);
 
-						self.opcodes.push(OpCode::Load {constant: index,
-							destination: *index_temporary, destination_local: true});
-						self.opcodes.push(OpCode::IndexWrite {indexee: *destination,
-							index: *index_temporary, value: *variable});
-
-						index_temporary.free(self);
-						variable.free(self);
+						self.opcodes.push(OpCode::LoadConst {
+							constant: index, register: index_register});
+						self.opcodes.push(OpCode::IndexWrite {
+							indexee: destination, index: index_register,
+							value: variable});
 					});
 
-					self.opcodes.push(OpCode::Return {result: *destination});
-					destination.free(self);
+					self.opcodes.push(OpCode::Return {result: destination});
 				},
 
 				// Assign
 
-				Statement::Assign {actor, value, local} => match actor {
-					Expression::Identifier(identifier) =>
-							match self.compile_expression(value, Some(identifier)) {
-						CompileResult::Evaluated(value) => {self.known_values.insert(
-							KnownValue::String(identifier.clone()), value);},
-						CompileResult::WroteToVariable(variable)
-							if &variable == identifier => (),
-						CompileResult::WroteToVariable(variable) => {
-							let variable = self.constant(Constant::String(variable));
-							let variable_temporary = self.temporary();
-							let identifier = Box::leak(identifier.clone().into_boxed_str());
-
-							self.opcodes.push(OpCode::Load {constant: variable,
-								destination: *variable_temporary, destination_local: true});
-							self.opcodes.push(OpCode::ReAssign {actor: *variable_temporary,
-								destination: identifier, destination_local: *local});
+				Statement::Assign {actor, value, local} => match local {
+					true => match actor {
+						Expression::Identifier(identifier) =>
+								match self.compile_expression(value) {
+							CompileResult::Evaluated(value) => {
+								// We don't have to assign this variable immediately, because
+								// it's known.
+								self.evaluated_variables.insert(identifier.clone(), value);
+							},
+							CompileResult::WroteToRegister(actor) => {
+								// identifier already has it's own register. We don't want to
+								// be able to change it's data if we write to the new variable,
+								// so we make a new register, and reassign.
+								self.evaluated_variables.remove(identifier);
+								let destination = self.register();
+								self.opcodes.push(OpCode::ReAssign {actor, destination});
+								self.variables_to_registers.insert(identifier.clone(), destination);
+							}
 						},
-						a => todo!("{:?}", a)
+						_ => panic!() // TODO: Can't happen? Shouldn't happen.
 					},
-					_ => todo!()
+					false => match actor {
+						Expression::Identifier(identifier) => match (
+							self.compile_expression(value),
+							self.evaluated_variables.get(identifier),
+							self.variables_to_registers.get(identifier),
+							self.up_values.get(identifier)
+						) {
+							(CompileResult::Evaluated(value), Some(_), _, _) =>
+								{self.evaluated_variables.insert(identifier.clone(), value);},
+							(CompileResult::WroteToRegister(register), Some(_), _, _) => {
+								self.evaluated_variables.remove(identifier);
+								self.variables_to_registers.insert(identifier.clone(), register);
+							},
+							(CompileResult::Evaluated(value), None, Some(&register), _) => {
+								let constant = match value {
+									Some(ref value) => self.constant(value.clone().into()),
+									None => u16::MAX
+								};
+
+								self.opcodes.push(OpCode::LoadConst {constant, register});
+								self.registers[register] = Some(value);
+							},
+							(CompileResult::WroteToRegister(old), None, Some(&new), _) => {
+								// TODO: This is what destination in compile_expression was for.
+								self.opcodes.push(OpCode::ReAssign {actor: old, destination: new});
+							},
+							(CompileResult::Evaluated(value),
+									None, None, Some(&up_value)) => {
+								let register = self.register();
+								let constant = match value {
+									Some(value) => self.constant(value.into()),
+									None => u16::MAX
+								};
+
+								self.opcodes.push(OpCode::LoadConst {constant, register});
+								self.opcodes.push(OpCode::SaveUpValue {register, up_value});
+							},
+							(CompileResult::WroteToRegister(register),
+									None, None, Some(&up_value)) =>
+								self.opcodes.push(OpCode::SaveUpValue {register, up_value}),
+							(CompileResult::Evaluated(value), None, None, None) => {
+								let global = Box::leak(identifier.clone().into_boxed_str());
+								let register = self.register();
+								let constant = match value {
+									Some(value) => self.constant(value.into()),
+									None => u16::MAX
+								};
+
+								self.opcodes.push(OpCode::LoadConst {constant, register});
+								self.opcodes.push(OpCode::SaveGlobal {register, global});
+							},
+							(CompileResult::WroteToRegister(register), None, None, None) => {
+								let global = Box::leak(identifier.clone().into_boxed_str());
+								self.opcodes.push(OpCode::SaveGlobal {register, global});
+							}
+						},
+						Expression::Index {indexee, index} =>
+								match self.compile_expression(value) {
+							CompileResult::Evaluated(value) => {
+								let indexee = self.compile_expression(indexee).to(self);
+								let index = self.compile_expression(index).to(self);
+
+								let register = self.register();
+								let constant = match value {
+									Some(value) => self.constant(value.into()),
+									None => u16::MAX
+								};
+
+								self.opcodes.push(OpCode::LoadConst {constant, register});
+								self.opcodes.push(OpCode::IndexWrite {indexee, index, value: register});
+							},
+							CompileResult::WroteToRegister(value) => {
+								let indexee = self.compile_expression(indexee).to(self);
+								let index = self.compile_expression(index).to(self);
+
+								self.opcodes.push(OpCode::IndexWrite {indexee, index, value});
+							}
+						},
+						_ => panic!() // TODO: Can't happen? Shouldn't happen.
+					}
 				},
 
 				// Expressions
 
-				Statement::Call {function, arguments} => {
-					let function = Box::new(function.clone());
-					let arguments = arguments.clone();
-					self.compile_expression(&Expression::Call {function, arguments}, Some(&"(_".to_owned()));
-				},
+				Statement::Call {function, arguments} =>
+					{self.compile_call(function, &arguments);},
 
 				Statement::Function {name, arguments, body, local} => {
-					// TODO: Upvals
-					let function = compile_function(body, arguments);
+					let up_values = self.variables_to_registers.clone();
+					let function = compile_function(body, arguments, up_values);
 					let constant = self.constant(Constant::Chunk(function.arc()));
-
-					self.opcodes.push(OpCode::Load {
-						constant,
-						destination: Box::leak(name.to_owned().into_boxed_str()),
-						destination_local: *local
-					})
-				},
-
-				a => todo!("{:?}", a)
+					
+					let register = self.register();
+					self.opcodes.push(OpCode::LoadConst {
+						constant, register});
+					match local {
+						true => {
+							self.variables_to_registers.insert(name.clone(), register);
+						},
+						false => {
+							self.opcodes.push(OpCode::SaveGlobal {register,
+								global: Box::leak(name.clone().into_boxed_str())});
+						}
+					}
+				}
 			}
 
 			current_statement = current_statement + 1;
 		}
 	}
 
-	fn compile_expression(&mut self, expression: &Expression,
-			destination: Option<&String>) -> CompileResult {
+	fn compile_expression(&mut self, expression: &Expression) -> CompileResult {
 		match expression {
 			// Identifier
 
 			Expression::Identifier(identifier) =>
-					match self.known_values.get(&KnownValue::String(identifier.clone())) {
+					match self.evaluated_variables.get(identifier) {
+				// If we evaluated a value for identifier, return it.
 				Some(known) => CompileResult::Evaluated(known.clone()),
-				None => CompileResult::WroteToVariable(identifier.clone())
+				// Otherwise, check the local scope.
+				None => match self.variables_to_registers.get(identifier) {
+					// If it's in local scope, return it's register.
+					Some(&register) => CompileResult::WroteToRegister(register),
+					// Otherwise, check up values.
+					None => match self.up_values.get(identifier) {
+						Some(&up_value) => {
+							let register = self.register();
+							self.opcodes.push(OpCode::LoadUpValue {up_value, register});
+							CompileResult::WroteToRegister(register)
+						},
+						// Otherwise, load from global scope.
+						None => {
+							let register = self.register();
+							self.opcodes.push(OpCode::LoadGlobal {global: Box::leak(
+								identifier.clone().into_boxed_str()), register});
+							CompileResult::WroteToRegister(register)
+						}
+					}
+				}
 			},
 
 			// Singleton literals
 
+			// These all just return evaluated.
 			Expression::Nil => CompileResult::Evaluated(None),
 			Expression::True =>
 				CompileResult::Evaluated(Some(KnownValue::Boolean(true))),
@@ -306,6 +360,7 @@ impl Generator {
 
 			// Literals
 
+			// Same with these.
 			Expression::Integer(integer) =>
 				CompileResult::Evaluated(Some(KnownValue::Integer(*integer))),
 			Expression::String(string) =>
@@ -314,173 +369,137 @@ impl Generator {
 			// Complex literals
 
 			Expression::Table {array, key_value} => {
-				let (destination, temporary) = destination
-					.map(|value| (&*Box::leak(value.clone().into_boxed_str()), None))
-					.unwrap_or_else(|| {
-						let temporary = self.temporary();
-						(*temporary, Some(temporary))
-					});
+				let register = self.register();
+				self.opcodes.push(OpCode::Create {destination: register});
 
-				self.opcodes.push(OpCode::Create {destination,
-					destination_local: temporary.is_some()});
 				key_value.iter().for_each(|KeyValue {key, value}| {
-					let key = self.compile_expression(key, None).to(self);
-					let value = self.compile_expression(value, None).to(self);
+					let key = self.compile_expression(key).to(self);
+					let value = self.compile_expression(value).to(self);
 
-					self.opcodes.push(OpCode::IndexWrite {indexee: destination,
-						index: *key, value: *value});
-
-					key.free(self);
-					value.free(self);
+					self.opcodes.push(OpCode::IndexWrite {index: key, value: value, indexee: register});
 				});
 				array.iter().enumerate().for_each(|(index, value)| {
-					let value = self.compile_expression(value, None).to(self);
+					let value = self.compile_expression(value).to(self);
 					let index = self.constant(Constant::Integer(index as i64 + 1));
-					let index_temporary = self.temporary();
+					let temporary = self.register();
 
-					self.opcodes.push(OpCode::Load {constant: index,
-						destination: *index_temporary, destination_local: true});
-					self.opcodes.push(OpCode::IndexWrite {indexee: destination,
-						index: *index_temporary, value: *value});
-
-					value.free(self);
-					index_temporary.free(self);
+					self.opcodes.push(OpCode::LoadConst {constant: index, register: temporary});
+					self.opcodes.push(OpCode::IndexWrite {index: temporary, value, indexee: register});
 				});
 
-				match temporary {
-					Some(temporary) => CompileResult::WroteToTemporary(temporary),
-					None => CompileResult::WroteToVariable(destination.to_owned())
-				}
+				CompileResult::WroteToRegister(register)
 			},
 
 			Expression::Function {arguments, body} => {
-				// TODO: Upvals
-				let function = compile_function(body, arguments);
-				let constant = self.constant(Constant::Chunk(function.arc()));
+				// We need to realize all values...
 
-				match destination {
-					Some(destination_string) => {
-						let destination = Box::leak(
-							destination_string.clone().into_boxed_str());
-						self.opcodes.push(OpCode::Load {constant, destination,
-							destination_local: true});
-						CompileResult::WroteToVariable(destination_string.clone())
-					},
-					None => {
-						let destination = self.temporary();
-						self.opcodes.push(OpCode::Load {constant, destination: *destination,
-							destination_local: true});
-						CompileResult::WroteToTemporary(destination)
-					}
-				}
+				let up_values = self.variables_to_registers.clone();
+				let function = compile_function(body, arguments, up_values);
+				let constant = self.constant(Constant::Chunk(function.arc()));
+				let destination = self.register();
+
+				self.opcodes.push(OpCode::LoadConst {constant, register: destination});
+				CompileResult::WroteToRegister(destination)
 			},
 
 			// Operators
 
-			Expression::Call {function, arguments} => {
-				match destination {
-					Some(destination) => {
-						let static_dest = Box::leak(destination.clone().into_boxed_str());
-						self.compile_call(function, arguments, static_dest);
-						CompileResult::WroteToVariable(destination.clone())
-					},
-					None => {
-						let temporary = self.temporary();
-						self.compile_call(function, arguments, *temporary);
-						CompileResult::WroteToTemporary(temporary)
-					}
-				}
+			Expression::Call {function, arguments} =>
+				CompileResult::WroteToRegister(self.compile_call(function, arguments)),
+
+			Expression::Index {indexee, index} => {
+				let destination = self.register();
+				let indexee = self.compile_expression(indexee).to(self);
+				let index = self.compile_expression(index).to(self);
+				self.opcodes.push(OpCode::IndexRead {indexee, index, destination});
+				CompileResult::WroteToRegister(destination)
 			},
 
-			a => todo!("{:?}", a)
+			Expression::BinaryOperation {..} => todo!()
 		}
 	}
 
-	fn compile_call(&mut self, function: &Expression, arguments: &Vec<Expression>,
-			destination: &'static str) {
-		let arguments_table = self.temporary();
+	fn compile_call(&mut self, function: &Expression,
+			arguments: &Vec<Expression>) -> usize {
+		let function = self.compile_expression(function);
 
-		self.opcodes.push(OpCode::Create {destination: *arguments_table,
-			destination_local: true});
-		let function = self.compile_expression(function, None);
+		let arguments_register = self.register();
+		self.opcodes.push(OpCode::Create {destination: arguments_register});
 
-		let handle_wrote = |this: &mut Generator, argument, index| {
-			let index = this.constant(Constant::Integer(index as i64 + 1));
-			let index_temporary = this.temporary();
-
-			this.opcodes.push(OpCode::Load {constant: index,
-				destination: *index_temporary, destination_local: true});
-			this.opcodes.push(OpCode::IndexWrite {indexee: *arguments_table,
-				index: *index_temporary, value: argument});
-		};
 		arguments.iter().enumerate().for_each(|(index, argument)|
-				match self.compile_expression(argument, None) {
+				match self.compile_expression(argument) {
 			CompileResult::Evaluated(Some(argument)) => {
 				let argument = self.constant(argument.into());
-				let argument_temporary = self.temporary();
+				let argument_register = self.register();
 				let index = self.constant(Constant::Integer(index as i64 + 1));
-				let index_temporary = self.temporary();
+				let index_register = self.register();
 
-				self.opcodes.push(OpCode::Load {constant: argument,
-					destination: *argument_temporary, destination_local: true});
-				self.opcodes.push(OpCode::Load {constant: index,
-					destination: *index_temporary, destination_local: true});
-				self.opcodes.push(OpCode::IndexWrite {indexee: *arguments_table,
-					index: *index_temporary, value: *argument_temporary});
-
-				argument_temporary.free(self);
-				index_temporary.free(self);
+				self.opcodes.push(OpCode::LoadConst {
+					constant: argument, register: argument_register});
+				self.opcodes.push(OpCode::LoadConst {
+					constant: index, register: index_register});
+				self.opcodes.push(OpCode::IndexWrite {
+					indexee: arguments_register, index: index_register,
+					value: argument_register});
 			},
 			CompileResult::Evaluated(None) => (),
-			CompileResult::WroteToVariable(argument) =>
-				handle_wrote(self, Box::leak(argument.into_boxed_str()), index),
-			CompileResult::WroteToTemporary(argument) => {
-				handle_wrote(self, *argument, index);
-				argument.free(self)
+			CompileResult::WroteToRegister(argument) => {
+				let index = self.constant(Constant::Integer(index as i64 + 1));
+				let index_register = self.register();
+				
+				self.opcodes.push(OpCode::LoadConst {
+					constant: index, register: index_register});
+				self.opcodes.push(OpCode::IndexWrite {
+					indexee: arguments_register, index: index_register, value: argument});
 			}
 		});
 
+		let destination = self.register();
 		match function {
-			CompileResult::Evaluated(Some(argument)) => {
-				let constant = self.constant(argument.into());
-				let constant_temporary = self.temporary();
+			CompileResult::Evaluated(argument) => {
+				let constant_register = self.register();
+				let constant = match argument {
+					Some(argument) => self.constant(argument.into()),
+					None => u16::MAX
+				};
 
-				self.opcodes.push(OpCode::Load {constant,
-					destination: *constant_temporary, destination_local: true});
-				self.opcodes.push(OpCode::Call {function: *constant_temporary,
-					arguments: *arguments_table, destination, destination_local: true});
-
-				constant_temporary.free(self);
+				self.opcodes.push(OpCode::LoadConst {
+					constant, register: constant_register});
+				self.opcodes.push(OpCode::Call {function: constant_register,
+					arguments: arguments_register, destination});
 			},
-			CompileResult::Evaluated(None) => panic!(),
-			CompileResult::WroteToVariable(function) => {
-				let function = Box::leak(function.into_boxed_str());
+			CompileResult::WroteToRegister(function) => {
 				self.opcodes.push(OpCode::Call {function,
-					arguments: *arguments_table, destination, destination_local: true});
-			},
-			CompileResult::WroteToTemporary(function) => {
-				self.opcodes.push(OpCode::Call {function: *function,
-					arguments: *arguments_table, destination, destination_local: true});
-				function.free(self);
+					arguments: arguments_register, destination});
 			}
 		}
 
-		arguments_table.free(self);
+		destination
 	}
 
 	fn compile_function_header(&mut self, arguments: &Vec<String>) {
+		let indexee = 0; // Function arguments...
 		arguments.iter().enumerate().for_each(|(index, argument)| {
-			let index = self.constant(Constant::Integer(index as i64 + 1));
-			let index_temporary = self.temporary();
-			let argument = Box::leak(argument.clone().into_boxed_str());
+			let constant = self.constant(Constant::Integer(index as i64 + 1));
+			let index = self.register();
+			let value = self.register();
 
-			self.opcodes.push(OpCode::Load {constant: index,
-				destination: *index_temporary, destination_local: true});
-			self.opcodes.push(OpCode::ReAssign {actor: *index_temporary,
-				destination: argument, destination_local: true});
-
-			index_temporary.free(self);
+			self.opcodes.push(OpCode::LoadConst {constant, register: index});
+			self.opcodes.push(OpCode::IndexRead {index, indexee, destination: value});
+			self.variables_to_registers.insert(argument.clone(), value);
 		});
 	}
 }
 
+impl Default for Generator {
+	fn default() -> Self {
+		Self {
+			constants: Vec::default(),
+			evaluated_variables: HashMap::default(),
+			opcodes: Vec::default(),
+			registers: vec![None],
+			up_values: HashMap::default(),
+			variables_to_registers: HashMap::default()
+		}
+	}
+}

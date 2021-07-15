@@ -1,6 +1,4 @@
-use crate::vm::value::IntoNillableValue;
-
-use self::super::vm::{value::{NillableValue::NonNil, Table, Value}, execute};
+use self::super::vm::value::{Table, Value};
 use std::{collections::HashMap, sync::Arc};
 use itertools::Itertools;
 
@@ -46,6 +44,7 @@ pub fn print(arguments: Arc<Table>, _: Arc<Table>)
 	Ok(Table::from_hashmap(vector_to_table(Vec::new())).arc())
 }
 
+/*
 pub fn pcall(arguments: Arc<Table>, global: Arc<Table>)
 		-> Result<Arc<Table>, String> {
 	let mut arguments = table_to_vector(&*arguments);
@@ -75,4 +74,21 @@ pub fn pcall(arguments: Arc<Table>, global: Arc<Table>)
 			Ok(Table::from_hashmap(vector_to_table(result)).arc())
 		}
 	}
+}*/
+
+pub fn getmetatable(arguments: Arc<Table>) -> Result<Arc<Table>, String> {
+	let arguments = table_to_vector(&arguments);
+	Ok(Table::from_hashmap(match arguments.get(0) {
+		Some(Some(Value::Table(table))) => match table.metatable.clone() {
+			Some(metatable) => {
+				let data = metatable.data.lock().unwrap();
+				match data.get(&Value::new_string("__metatable")) {
+					Some(fake) => vector_to_table(vec![Some(fake.clone())]),
+					None => vector_to_table(vec![Some(Value::Table(metatable.clone()))])
+				}
+			},
+			None => vector_to_table(vec![])
+		},
+		_ => vector_to_table(vec![])
+	}).arc())
 }
