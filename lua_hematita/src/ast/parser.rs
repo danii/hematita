@@ -292,24 +292,40 @@ pub fn parse_expression_concat<I>(iter: &mut TokenIterator<I>)
 pub fn parse_expression_unary<I>(iter: &mut TokenIterator<I>)
 		-> Result<Expression> where I: Iterator<Item = Token> {
 	Ok(match iter.peek() {
-		Some(Token::KeywordNot) => Expression::UnaryOperation {
-			operator: UnaryOperator::LogicalNot,
-			operand: Box::new(parse_expression_unary(iter)?)
+		Some(Token::KeywordNot) => {
+			iter.eat();
+
+			Expression::UnaryOperation {
+				operator: UnaryOperator::LogicalNot,
+				operand: Box::new(parse_expression_unary(iter)?)
+			}
 		},
 
-		Some(Token::Length) => Expression::UnaryOperation {
-			operator: UnaryOperator::Length,
-			operand: Box::new(parse_expression_unary(iter)?)
+		Some(Token::Length) => {
+			iter.eat();
+
+			Expression::UnaryOperation {
+				operator: UnaryOperator::Length,
+				operand: Box::new(parse_expression_unary(iter)?)
+			}
 		},
 
-		Some(Token::Minus) => Expression::UnaryOperation {
-			operator: UnaryOperator::Negate,
-			operand: Box::new(parse_expression_unary(iter)?)
+		Some(Token::Minus) => {
+			iter.eat();
+
+			Expression::UnaryOperation {
+				operator: UnaryOperator::Negate,
+				operand: Box::new(parse_expression_unary(iter)?)
+			}
 		},
 
-		Some(Token::BitwiseNotOrXOr) => Expression::UnaryOperation {
-			operator: UnaryOperator::BitwiseNot,
-			operand: Box::new(parse_expression_unary(iter)?)
+		Some(Token::BitwiseNotOrXOr) => {
+			iter.eat();
+
+			Expression::UnaryOperation {
+				operator: UnaryOperator::BitwiseNot,
+				operand: Box::new(parse_expression_unary(iter)?)
+			}
 		},
 
 		_ => parse_expression_exponent(iter)?
