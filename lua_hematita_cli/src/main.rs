@@ -1,7 +1,7 @@
 use lua_hematita::{
 	ast::{lexer::Lexer, parser::{TokenIterator, parse}},
 	compiler::compile,
-	lua_lib::{print, r#type},
+	lua_lib::{print, r#type, getmetatable, setmetatable},
 	vm::{VirtualMachine, value::{Table, Value}}
 };
 use maplit::hashmap;
@@ -50,7 +50,11 @@ fn main() {
 				Value::new_string("print") =>
 					Value::NativeFunction(print),
 				Value::new_string("type") =>
-					Value::NativeFunction(r#type)/*,
+					Value::NativeFunction(r#type),
+				Value::new_string("getmetatable") =>
+					Value::NativeFunction(getmetatable),
+				Value::new_string("setmetatable") =>
+					Value::NativeFunction(setmetatable)/*,
 				Value::new_string("pcall") =>
 					Value::NativeFunction(pcall)*/
 			}).arc();

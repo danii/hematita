@@ -165,6 +165,10 @@ pub enum NillableValue<V>
 
 impl<V> NillableValue<V>
 		where V: Borrow<Value> {
+	pub fn is_non_nil(&self) -> bool {
+		matches!(self, NonNil(_))
+	}
+
 	/// Get the human readable name of the type of this value.
 	pub fn type_name(&self) -> &'static str {
 		match self {
@@ -292,7 +296,7 @@ impl Default for MaybeUpValue {
 #[derive(Debug, Default)]
 pub struct Table {
 	pub data: Mutex<HashMap<Value, Value>>,
-	pub metatable: Option<Arc<Table>>
+	pub metatable: Mutex<Option<Arc<Table>>>
 }
 
 impl Table {
@@ -301,7 +305,12 @@ impl Table {
 	}
 
 	pub fn from_hashmap(data: HashMap<Value, Value>) -> Self {
-		Self {data: Mutex::new(data), metatable: None}
+		Self {data: Mutex::new(data), metatable: Mutex::new(None)}
+	}
+
+	pub fn index(&self, index: &Value) -> NillableValue<Value> {
+		let data = self.data.lock().unwrap();
+		data.get(index).nillable().cloned()
 	}
 
 	pub fn array<V, const N: usize>(data: [&NillableValue<V>; N]) -> Self

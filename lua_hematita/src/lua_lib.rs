@@ -79,10 +79,31 @@ pub fn pcall(arguments: Arc<Table>, global: Arc<Table>)
 	}
 }*/
 
-pub fn getmetatable(arguments: Arc<Table>) -> Result<Arc<Table>, String> {
+pub fn setmetatable(arguments: Arc<Table>, _: Arc<Table>)
+		-> Result<Arc<Table>, String> {
+	let arguments = table_to_vector(&arguments);
+	let meta = match arguments.get(1) {
+		Some(Some(Value::Table(meta))) => meta.clone(),
+		_ => return Err("metatable error".to_owned())
+	};
+
+	match arguments.get(0) {
+		Some(Some(Value::Table(table))) => {
+			let mut table = table.metatable.lock().unwrap();
+			*table = Some(meta)
+		},
+		_ => return Err("metatable error".to_owned())
+	}
+
+	Ok(Table::from_hashmap(vector_to_table(vec![])).arc())
+}
+
+pub fn getmetatable(arguments: Arc<Table>, _: Arc<Table>)
+		-> Result<Arc<Table>, String> {
 	let arguments = table_to_vector(&arguments);
 	Ok(Table::from_hashmap(match arguments.get(0) {
-		Some(Some(Value::Table(table))) => match table.metatable.clone() {
+		Some(Some(Value::Table(table))) =>
+				match table.metatable.lock().unwrap().clone() {
 			Some(metatable) => {
 				let data = metatable.data.lock().unwrap();
 				match data.get(&Value::new_string("__metatable")) {

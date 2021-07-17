@@ -2,10 +2,19 @@ pub mod constant;
 pub mod value;
 
 use self::{
+	super::ast::parser::{BinaryOperator, UnaryOperator},
 	constant::Constant,
-	value::{Function, IntoNillableValue, MaybeUpValue, NillableValue, Nil, NonNil, Table, Value}
+	value::{
+		Function, IntoNillableValue, MaybeUpValue, NillableValue, Nil, NonNil,
+		Table, Value
+	}
 };
-use std::{fmt::{Display, Formatter, Result as FMTResult}, sync::Arc};
+use std::{
+	cmp::max,
+	collections::HashMap,
+	fmt::{Display, Formatter, Result as FMTResult},
+	sync::Arc
+};
 
 #[derive(Clone, Copy)]
 enum Reference<'s> {
@@ -29,6 +38,7 @@ pub struct VirtualMachine {
 	number_meta: Option<Arc<Table>>,
 	string_meta: Option<Arc<Table>>,
 	boolean_meta: Option<Arc<Table>>,
+	function_meta: Option<Arc<Table>>,
 	global: Arc<Table>
 }
 
@@ -38,6 +48,7 @@ impl VirtualMachine {
 			number_meta: None,
 			string_meta: None,
 			boolean_meta: None,
+			function_meta: None,
 			global
 		}
 	}
@@ -60,7 +71,7 @@ struct StackFrame<'v, 'f> {
 }
 
 impl<'v, 'f> StackFrame<'v, 'f> {
-	fn read_reference<'s>(&self, reference: impl Into<Reference<'s>>)
+	fn reference<'s>(&self, reference: impl Into<Reference<'s>>)
 			-> NillableValue<Value> {
 		match reference.into() {
 			Reference::Global(name) => {
@@ -94,30 +105,85 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 		}
 	}
 
-	/*
-	fn metamethod(&self, object: usize, method: &str, left: NillableValue<Value>,
-			right: NillableValue<Value>) {
-		match self.read_reference(Reference::Local(object)) {
-			NonNil(Value::Integer(integer)) => {
-				let meta = self.virtual_machine.number_meta.as_ref().unwrap();
+	fn meta_method(&self, object: &NillableValue<Value>, method: &str)
+			-> NillableValue<Value> {
+		match object {
+			NonNil(Value::Integer(_)) => {
+				let meta = match self.virtual_machine.number_meta.as_ref() {
+					Some(meta) => meta,
+					None => return Nil
+				};
+
 				let meta = meta.data.lock().unwrap();
-				meta.get(&Value::new_string(method));
+				meta.get(&Value::new_string(method)).nillable().cloned()
 			},
-			NonNil(Value::String(string)) => {
-				let meta = self.virtual_machine.string_meta.as_ref().unwrap();
+			NonNil(Value::String(_)) => {
+				let meta = match self.virtual_machine.string_meta.as_ref() {
+					Some(meta) => meta,
+					None => return Nil
+				};
+
 				let meta = meta.data.lock().unwrap();
-				meta.get(&Value::new_string(method));
+				meta.get(&Value::new_string(method)).nillable().cloned()
 			},
-			NonNil(Value::Boolean(boolean)) => {
-				let meta = self.virtual_machine.boolean_meta.as_ref().unwrap();
+			NonNil(Value::Boolean(_)) => {
+				let meta = match self.virtual_machine.boolean_meta.as_ref() {
+					Some(meta) => meta,
+					None => return Nil
+				};
+
 				let meta = meta.data.lock().unwrap();
-				meta.get(&Value::new_string(method));
+				meta.get(&Value::new_string(method)).nillable().cloned()
 			},
-			NonNil(Value::Table(table)) => match table.metatable {
-				Some(metatable) => metatable
-			}
+			NonNil(Value::Function(_)) | NonNil(Value::NativeFunction(_)) => {
+				let meta = match self.virtual_machine.function_meta.as_ref() {
+					Some(meta) => meta,
+					None => return Nil
+				};
+
+				let meta = meta.data.lock().unwrap();
+				meta.get(&Value::new_string(method)).nillable().cloned()
+			},
+			NonNil(Value::Table(table)) => match &*table.metatable.lock().unwrap() {
+				Some(meta) => {
+					let meta = meta.data.lock().unwrap();
+					meta.get(&Value::new_string(method)).nillable().cloned()
+				},
+				None => Nil
+			},
+			_ => Nil
 		}
-	}*/
+	}
+
+	fn call(&self, function: NillableValue<Value>, arguments: Arc<Table>)
+			-> Result<Arc<Table>, String> {
+		match function {
+			NonNil(Value::Function(function)) =>
+				self.virtual_machine.execute(&*function, arguments),
+			NonNil(Value::NativeFunction(function)) =>
+				function(arguments, self.virtual_machine.global.clone()),
+			// NOTE: While this can cause unbounded recursion, this is actually what
+			// happens in the main implementation.
+			function if self.meta_method(&function, "__call").is_non_nil() => {
+				let arguments = arguments.data.lock().unwrap();
+				let mut arguments = arguments.iter()
+					.map(|(key, value)| match key {
+						Value::Integer(index) => (Value::Integer(index + 1), value.clone()),
+						key => (key.clone(), value.clone())
+					}).collect::<HashMap<_, _>>();
+				match &function {
+					NonNil(function) => arguments.insert(
+						Value::Integer(1), function.clone()),
+					Nil => arguments.remove(&Value::Integer(1))
+				};
+
+				let function = self.meta_method(&function, "__call");
+				self.call(function, Table::from_hashmap(arguments).arc())
+			},
+			function => Err(format!("attempt to call a {} value",
+				function.type_name()))
+		}
+	}
 
 	fn execute(&mut self, arguments: Arc<Table>) -> Result<Arc<Table>, String> {
 		// Set arguments.
@@ -132,38 +198,21 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 
 			match chunk.opcodes[current_opcode] {
 				OpCode::Call {function, arguments, destination} => {
-					let arguments = match self.read_reference(arguments) {
+					let arguments = match self.reference(arguments) {
 						NonNil(Value::Table(arguments)) => arguments,
 						value => break Err(format!("attempt to call a function with a {} value", value.type_name()))
 					};
-			
-					match self.read_reference(function) {
-						NonNil(Value::Function(function)) => {
-							let v = self.virtual_machine.execute(&*function, arguments)?;
-							let v = v.data.lock().unwrap();
-							self.write_reference(destination, v.get(&Value::Integer(1)).nillable().cloned());
-							// TODO: Tuple stuff!
-							/*self.write_reference(destination,
-								NonNil(Value::Table(self.virtual_machine.execute(&*function)?)));*/
-						},
-			
-						NonNil(Value::NativeFunction(function)) => {
-							let result = function(arguments, Table::default().arc())?;
-							// TODO: Returning tuples.
-							let result = result.data.lock().unwrap();
-							self.write_reference(destination, result.get(&Value::Integer(1)).nillable().cloned());
-						},
-			
-						function => break Err(format!("attempt to call a {} value",
-							function.type_name()))
-					}
+
+					let function = self.reference(function);
+					let result = self.call(function, arguments)?;
+					self.write_reference(destination, NonNil(Value::Table(result)));
 				},
 
 				OpCode::IndexRead {indexee, index, destination, ..} =>
-						match self.read_reference(indexee) {
+						match self.reference(indexee) {
 					NonNil(Value::Table(table)) => {
 						// TODO: Metatable
-						let index = match self.read_reference(index) {
+						let index = match self.reference(index) {
 							NonNil(index) => index,
 							Nil => return Err("table index is nil".to_owned())
 						};
@@ -178,16 +227,16 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 				},
 
 				OpCode::IndexWrite {indexee, index, value} =>
-						match self.read_reference(indexee) {
+						match self.reference(indexee) {
 					NonNil(Value::Table(table)) => {
 						// TODO: Metatable
-						let index = match self.read_reference(index) {
+						let index = match self.reference(index) {
 							NonNil(index) => index,
 							Nil => break Err("table index is nil".to_owned())
 						};
 		
 						let mut table = table.data.lock().unwrap();
-						match self.read_reference(value) {
+						match self.reference(value) {
 							NonNil(value) => table.insert(index, value),
 							Nil => table.remove(&index)
 						};
@@ -200,130 +249,159 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 				OpCode::Create {destination, ..} => {self.write_reference(destination,
 					NonNil(Value::Table(Table::default().arc())));},
 
-				OpCode::BinaryOperation {..} => {
-					/*
-					let first = retrieve(&Value::new_string(first),
-						&mut local, &global).nillable();
-					let second = retrieve(&Value::new_string(second),
-						&mut local, &global).nillable();
-					let destination = Value::new_string(destination);
+				OpCode::BinaryOperation {left, right, operation, destination} =>
+						self.write_reference(destination, match (self.reference(left),
+							self.reference(right), operation) {
+					// Arithmetic
 
-					// Uneeded when 53667 and 51114.
-					// In order to have the match statement continue after we actually get
-					// the function object, we currently have to use a block within the if
-					// statements condition, primarily because 51114 isn't implemented yet,
-					// which would allow us to check the contents of the Mutex during match
-					// and save a variable with it's contents. 53667 needs to be implemented
-					// to, because we also need to pattern match through an Arc.
-					let mut transfer_result = None;
-					let result = match operation {
-						// BinaryOperation::Equal
+					// Add
+					// TODO: Handle overflow...
+					(NonNil(Value::Integer(left)), NonNil(Value::Integer(right)),
+							BinaryOperation::Add) => NonNil(Value::Integer(left + right)),
+					(left, right, BinaryOperation::Add)
+							if self.meta_method(&left, "__add").is_non_nil() => {
+						let meta = self.meta_method(&left, "__add");
+						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						result.index(&Value::Integer(1))
+					},
+					(left, right, BinaryOperation::Add)
+							if self.meta_method(&right, "__add").is_non_nil() => {
+						let meta = self.meta_method(&right, "__add");
+						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						result.index(&Value::Integer(1))
+					},
 
-						// BinaryOPeration::NotEqual
+					// Subtract
+					// TODO: Handle overflow...
+					(NonNil(Value::Integer(left)), NonNil(Value::Integer(right)),
+							BinaryOperation::Subtract) => NonNil(Value::Integer(left - right)),
+					(left, right, BinaryOperation::Subtract)
+							if self.meta_method(&left, "__sub").is_non_nil() => {
+						let meta = self.meta_method(&left, "__sub");
+						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						result.index(&Value::Integer(1))
+					},
+					(left, right, BinaryOperation::Subtract)
+							if self.meta_method(&right, "__sub").is_non_nil() => {
+						let meta = self.meta_method(&right, "__sub");
+						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						result.index(&Value::Integer(1))
+					},
 
-						// BinaryOperation::LessThan
+					// Multiply
+					// TODO: Handle overflow...
+					(NonNil(Value::Integer(left)), NonNil(Value::Integer(right)),
+							BinaryOperation::Multiply) => NonNil(Value::Integer(left * right)),
+					(left, right, BinaryOperation::Multiply)
+							if self.meta_method(&left, "__mul").is_non_nil() => {
+						let meta = self.meta_method(&left, "__mul");
+						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						result.index(&Value::Integer(1))
+					},
+					(left, right, BinaryOperation::Multiply)
+							if self.meta_method(&right, "__mul").is_non_nil() => {
+						let meta = self.meta_method(&right, "__mul");
+						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						result.index(&Value::Integer(1))
+					},
 
-						BinaryOperation::LessThanOrEqual => match (&first, &second) {
-							(NonNil(Value::Integer(first)), NonNil(Value::Integer(second))) =>
-								Value::Boolean(first <= second),
-							(NonNil(Value::String(first)), NonNil(Value::String(second))) =>
-								Value::Boolean(first <= second),
-							/*
-								// Code for when features are added...
-								if let Some(metamethod) = &metamethod.metatable &&
-									if let NonNil(metamethod) = metamethod.data.lock().unwrap()
-										.get(&Value::identifier("__le")).nillable() => {
-							*/
-							(NonNil(Value::Table(metamethod)), _) if {
-								if_chain! {
-									if let Some(metamethod) = &metamethod.metatable;
-									if let NonNil(metamethod) = metamethod.data.lock().unwrap()
-										.get(&Value::new_string("__le")).nillable();
-									then {
-										match metamethod {
-											Value::Function(metamethod) => {
-												let mut arguments = HashMap::new();
-												if let NonNil(first) = first.cloned()
-													{arguments.insert(Value::Integer(0), first);}
-												if let NonNil(second) = second.cloned()
-													{arguments.insert(Value::Integer(0), second);}
-												transfer_result = Some(execute(
-													&*metamethod, arguments, global.clone())?);
-												true
-											},
-											Value::NativeFunction(metamethod) => {
-												transfer_result = Some(metamethod(Table::array(
-													[&first, &second]).arc(), global.clone())?);
-												true
-											},
-											_ => false
-										}
-									} else {false}
-								}
-							} => {
-								// Panic is impossible because we put in something in the if.
-								transfer_result.unwrap().data.lock().unwrap()
-									.get(&Value::Integer(0)).nillable().coerce_to_boolean()
-							},
-							/*
-								// Code for when features are added...
-								if let Some(metamethod) = &metamethod.metatable &&
-									if let NonNil(metamethod) = metamethod.data.lock().unwrap()
-										.get(&Value::identifier("__le")).nillable() => {
-							*/
-							(_, NonNil(Value::Table(metamethod))) if {
-								if_chain! {
-									if let Some(metamethod) = &metamethod.metatable;
-									if let NonNil(metamethod) = metamethod.data.lock().unwrap()
-										.get(&Value::new_string("__le")).nillable();
-									then {
-										match metamethod {
-											Value::Function(metamethod) => {
-												let mut arguments = HashMap::new();
-												if let NonNil(first) = first.cloned()
-													{arguments.insert(Value::Integer(0), first);}
-												if let NonNil(second) = second.cloned()
-													{arguments.insert(Value::Integer(0), second);}
-												transfer_result = Some(execute(
-													&*metamethod, arguments, global.clone())?);
-												true
-											},
-											Value::NativeFunction(metamethod) => {
-												transfer_result = Some(metamethod(Table::array(
-													[&first, &second]).arc(), global.clone())?);
-												true
-											},
-											_ => false
-										}
-									} else {false}
-								}
-							} => {
-								// Panic is impossible because we put in something in the if.
-								transfer_result.unwrap().data.lock().unwrap()
-									.get(&Value::Integer(0)).nillable().coerce_to_boolean()
-							},
-							_ => todo!()
-						},
-						
-						// BinaryOperation::GreaterThan
+					// Multiply
+					// TODO: Handle overflow...
+					// TODO: Handle division by zero...
+					(NonNil(Value::Integer(left)), NonNil(Value::Integer(right)),
+							BinaryOperation::Divide) => NonNil(Value::Integer(left / right)),
+					(left, right, BinaryOperation::Divide)
+							if self.meta_method(&left, "__div").is_non_nil() => {
+						let meta = self.meta_method(&left, "__div");
+						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						result.index(&Value::Integer(1))
+					},
+					(left, right, BinaryOperation::Divide)
+							if self.meta_method(&right, "__div").is_non_nil() => {
+						let meta = self.meta_method(&right, "__div");
+						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						result.index(&Value::Integer(1))
+					},
 
-						// BinaryOperation::LessThan
+					// TODO: These should be compiler constructs because of short circuit
+					// evaluation.
+					// Logical
 
-						// BinaryOperation::Add
+					// And
+					(left, right, BinaryOperation::LogicalAnd) =>
+						if left.coerce_to_bool() && right.coerce_to_bool() {right}
+						else {left},
 
-						// BinaryOperation::Subtract
+					// Or
+					(left, right, BinaryOperation::LogicalOr) =>
+						if left.coerce_to_bool() {left}
+						else {right},
 
-						_ => todo!()
-					};
+					// TODO: Better error handling...
+					_ => return Err("unknown binary operation error".to_owned())
+				}),
 
-					local.insert(destination, result);*/
+				// NOTE: Providing two arguments on meta methods is required by spec,
+				// because of historical reasons.
+				OpCode::UnaryOperation {operand, operation, destination} =>
+						self.write_reference(destination, match (
+							self.reference(operand), operation) {
+					// Arithmetic
 
-					todo!()
-				},
+					// Negate
+					(NonNil(Value::Integer(operand)), UnaryOperation::Negate) =>
+						NonNil(Value::Integer(-operand)),
+					(operand, UnaryOperation::Negate)
+							if self.meta_method(&operand, "__unm").is_non_nil() => {
+						let meta = self.meta_method(&operand, "__unm");
+						let result = self.call(meta,
+							Table::array([&operand, &operand]).arc())?;
+						result.index(&Value::Integer(1))
+					},
+					(operand, UnaryOperation::Negate) =>
+						return Err(format!("attempt to perform arithmetic on a {} value",
+							operand.type_name())),
 
-				OpCode::UnaryOperation {..} => {
-					todo!()
-				},
+					// Logical
+
+					// Not
+					(operand, UnaryOperation::LogicalNot) =>
+						NonNil(Value::Boolean(!operand.coerce_to_bool())),
+
+					// Other
+
+					// Length
+					// TODO: Would this become a float if it would overflow an i64?
+					(NonNil(Value::String(operand)), UnaryOperation::Length) =>
+						NonNil(Value::Integer(operand.len() as i64)),
+					(operand, UnaryOperation::Length)
+							if self.meta_method(&operand, "__len").is_non_nil() => {
+						let meta = self.meta_method(&operand, "__len");
+						let result = self.call(meta,
+							Table::array([&operand, &operand]).arc())?;
+						result.index(&Value::Integer(1))
+					},
+					(NonNil(Value::Table(operand)), UnaryOperation::Length) => {
+						let operand = operand.data.lock().unwrap();
+						// NOTE: This is not what the main lua implementation does, but it
+						// is valid, as the spec says the length operator may return *any
+						// border*. The table length operator in lua just may not always
+						// return the last border of the table. See more at:
+						// https://www.lua.org/manual/5.4/manual.html#3.4.7
+						let length = operand.keys()
+							.filter_map(|key| match key {
+								Value::Integer(key) => Some(*key),
+								_ => None
+							})
+							.max().map(|key| max(key, 0)).unwrap_or(0);
+						NonNil(Value::Integer(length))
+					},
+					(operand, UnaryOperation::Length) =>
+						return Err(format!("attempt to get length of a {} value",
+							operand.type_name())),
+
+					_ => return Err("unknown unary operation error".to_owned())
+				}),
 
 				OpCode::Jump {operation, r#if: None} => {
 					current_opcode = operation as usize;
@@ -331,7 +409,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 				},
 
 				OpCode::Jump {operation, r#if: Some(r#if)} => {
-					let r#if = self.read_reference(Reference::Local(r#if));
+					let r#if = self.reference(r#if);
 					if r#if.nillable().coerce_to_bool() {
 						current_opcode = operation as usize;
 						continue
@@ -378,13 +456,13 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 				},
 
 				OpCode::LoadGlobal {global, register} => {
-					let value = self.read_reference(Reference::Global(global));
-					self.write_reference(Reference::Local(register), value);
+					let value = self.reference(global);
+					self.write_reference(register, value);
 				},
 
 				OpCode::SaveGlobal {register, global} => {
-					let value = self.read_reference(Reference::Local(register));
-					self.write_reference(Reference::Global(global), value);
+					let value = self.reference(register);
+					self.write_reference(global, value);
 				},
 
 				OpCode::LoadUpValue {register, up_value} => {
@@ -480,10 +558,10 @@ pub enum OpCode<'s> {
 	},
 
 	BinaryOperation {
-		first: &'s str,
-		second: &'s str,
+		left: usize,
+		right: usize,
 		operation: BinaryOperation,
-		destination: &'s str,
+		destination: usize
 	},
 
 	UnaryOperation {
@@ -627,19 +705,106 @@ impl<'s> Display for OpCode<'s> {
 // instead? Same goes for UnaryOperation and Operator.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum BinaryOperation {
+	// Arithmetic
+	Add,
+	Subtract,
+	Multiply,
+	Divide,
+	FloorDivide,
+	Modulo,
+	Exponent,
+
+	// Bitwise
+	BitwiseAnd,
+	BitwiseOr,
+	BitwiseXOr,
+	ShiftLeft,
+	ShiftRight,
+
+	// Relational
 	Equal,
 	NotEqual,
 	LessThan,
 	LessThanOrEqual,
 	GreaterThan,
 	GreaterThanOrEqual,
-	Add,
-	Subtract
+
+	// Logical
+	LogicalAnd,
+	LogicalOr,
+
+	// Other
+	Concat
+}
+
+impl From<BinaryOperator> for BinaryOperation {
+	fn from(ast: BinaryOperator) -> Self {
+		match ast {
+			// Arithmetic
+			BinaryOperator::Add => Self::Add,
+			BinaryOperator::Subtract => Self::Subtract,
+			BinaryOperator::Multiply => Self::Multiply,
+			BinaryOperator::Divide => Self::Divide,
+			BinaryOperator::FloorDivide => Self::FloorDivide,
+			BinaryOperator::Modulo => Self::Modulo,
+			BinaryOperator::Exponent => Self::Exponent,
+
+			// Bitwise
+			BinaryOperator::BitwiseAnd => Self::BitwiseAnd,
+			BinaryOperator::BitwiseOr => Self::BitwiseOr,
+			BinaryOperator::BitwiseXOr => Self::BitwiseXOr,
+			BinaryOperator::ShiftLeft => Self::ShiftLeft,
+			BinaryOperator::ShiftRight => Self::ShiftRight,
+
+			// Relational
+			BinaryOperator::Equal => Self::Equal,
+			BinaryOperator::NotEqual => Self::NotEqual,
+			BinaryOperator::LessThan => Self::LessThan,
+			BinaryOperator::LessThanOrEqual => Self::LessThanOrEqual,
+			BinaryOperator::GreaterThan => Self::GreaterThan,
+			BinaryOperator::GreaterThanOrEqual => Self::GreaterThanOrEqual,
+
+			// Logical
+			BinaryOperator::LogicalAnd => Self::LogicalAnd,
+			BinaryOperator::LogicalOr => Self::LogicalOr,
+
+			// Other
+			BinaryOperator::Concat => Self::Concat
+		}
+	}
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum UnaryOperation {
-	Not
+	// Arithmetic
+	Negate,
+
+	// Bitwise
+	BitwiseNot,
+
+	// Logical
+	LogicalNot,
+
+	// Other
+	Length
+}
+
+impl From<UnaryOperator> for UnaryOperation {
+	fn from(ast: UnaryOperator) -> Self {
+		match ast {
+			// Arithmetic
+			UnaryOperator::Negate => Self::Negate,
+
+			// Bitwise
+			UnaryOperator::BitwiseNot => Self::BitwiseNot,
+
+			// Logical
+			UnaryOperator::LogicalNot => Self::LogicalNot,
+
+			// Other
+			UnaryOperator::Length => Self::Length
+		}
+	}
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

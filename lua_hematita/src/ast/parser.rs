@@ -240,6 +240,8 @@ expression! {
 		KeywordAnd => LogicalAnd
 	},
 	parse_expression_comparison(parse_expression_bitwise_or) {
+		Equal => Equal,
+		NotEqual => NotEqual,
 		LessThan => LessThan,
 		GreaterThan => GreaterThan,
 		LessThanOrEqual => LessThanOrEqual,

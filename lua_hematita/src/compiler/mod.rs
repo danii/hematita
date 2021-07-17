@@ -160,7 +160,7 @@ impl Generator {
 
 							self.opcodes.push(OpCode::UnaryOperation {
 								operand: variable,
-								operation: UnaryOperation::Not,
+								operation: UnaryOperation::LogicalNot,
 								destination: variable
 							});
 							let jump = self.opcodes.len();
@@ -436,9 +436,22 @@ impl Generator {
 				CompileResult::WroteToRegister(destination)
 			},
 
-			Expression::BinaryOperation {..} => todo!(),
+			Expression::BinaryOperation {left, operator, right} => {
+				let left = self.compile_expression(left).to(self);
+				let right = self.compile_expression(right).to(self);
+				let destination = self.register();
+				self.opcodes.push(OpCode::BinaryOperation {left, right, destination,
+					operation: (*operator).into()});
+				CompileResult::WroteToRegister(destination)
+			},
 
-			Expression::UnaryOperation {..} => todo!()
+			Expression::UnaryOperation {operator, operand} => {
+				let operand = self.compile_expression(operand).to(self);
+				let destination = self.register();
+				self.opcodes.push(OpCode::UnaryOperation {operand, destination,
+					operation: (*operator).into()});
+				CompileResult::WroteToRegister(destination)
+			}
 		}
 	}
 
@@ -477,7 +490,7 @@ impl Generator {
 			}
 		});
 
-		let destination = self.register();
+		let indexee = self.register();
 		match function {
 			CompileResult::Evaluated(argument) => {
 				let constant_register = self.register();
@@ -489,14 +502,20 @@ impl Generator {
 				self.opcodes.push(OpCode::LoadConst {
 					constant, register: constant_register});
 				self.opcodes.push(OpCode::Call {function: constant_register,
-					arguments: arguments_register, destination});
+					arguments: arguments_register, destination: indexee});
 			},
 			CompileResult::WroteToRegister(function) => {
 				self.opcodes.push(OpCode::Call {function,
-					arguments: arguments_register, destination});
+					arguments: arguments_register, destination: indexee});
 			}
 		}
 
+		// TODO: Tuples (tuples are actually a compile time construct)
+		let destination = self.register();
+		let index = self.register();
+		let constant = self.constant(Constant::Integer(1));
+		self.opcodes.push(OpCode::LoadConst {register: index, constant});
+		self.opcodes.push(OpCode::IndexRead {index, indexee, destination});
 		destination
 	}
 
