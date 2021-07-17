@@ -310,6 +310,23 @@ impl Generator {
 					{self.compile_call(function, &arguments);},
 
 				Statement::Function {name, arguments, body, local} => {
+					// We need to realize all values...
+					let evaluated = self.evaluated_variables.iter()
+						.map(|(name, value)| (name.clone(), value.clone()))
+						.collect::<Vec<_>>();
+					evaluated.into_iter()
+						.for_each(|(name, value)| {
+							let register = self.register();
+							let constant = match value.clone() {
+								Some(value) => self.constant(value.into()),
+								None => u16::MAX
+							};
+	
+							self.opcodes.push(OpCode::LoadConst {constant, register});
+							self.registers[register] = Some(value);
+							self.variables_to_registers.insert(name, register);
+						});
+
 					let register = self.register();
 					if *local {
 						self.variables_to_registers.insert(name.clone(), register);
@@ -409,6 +426,21 @@ impl Generator {
 
 			Expression::Function {arguments, body} => {
 				// We need to realize all values...
+				let evaluated = self.evaluated_variables.iter()
+					.map(|(name, value)| (name.clone(), value.clone()))
+					.collect::<Vec<_>>();
+				evaluated.into_iter()
+					.for_each(|(name, value)| {
+						let register = self.register();
+						let constant = match value.clone() {
+							Some(value) => self.constant(value.into()),
+							None => u16::MAX
+						};
+
+						self.opcodes.push(OpCode::LoadConst {constant, register});
+						self.registers[register] = Some(value);
+						self.variables_to_registers.insert(name, register);
+					});
 
 				let up_values = self.variables_to_registers.iter()
 					.map(|(key, &value)| (key.clone(), (value, false)))
