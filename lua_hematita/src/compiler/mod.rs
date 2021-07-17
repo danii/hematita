@@ -310,25 +310,24 @@ impl Generator {
 					{self.compile_call(function, &arguments);},
 
 				Statement::Function {name, arguments, body, local} => {
+					let register = self.register();
+					if *local {
+						self.variables_to_registers.insert(name.clone(), register);
+					}
 					let up_values = self.variables_to_registers.iter()
 						.map(|(key, &value)| (key.clone(), (value, false)))
 						.chain(self.up_values.iter()
 							.map(|(key, &(value, _))| (key.clone(), (value, true))))
 						.collect();
+
 					let function = compile_function(body, arguments, up_values);
 					let constant = self.constant(Constant::Chunk(function.arc()));
 					
-					let register = self.register();
 					self.opcodes.push(OpCode::LoadConst {
 						constant, register});
-					match local {
-						true => {
-							self.variables_to_registers.insert(name.clone(), register);
-						},
-						false => {
-							self.opcodes.push(OpCode::SaveGlobal {register,
-								global: Box::leak(name.clone().into_boxed_str())});
-						}
+					if !*local {
+						self.opcodes.push(OpCode::SaveGlobal {register,
+							global: Box::leak(name.clone().into_boxed_str())});
 					}
 				}
 			}
@@ -437,7 +436,9 @@ impl Generator {
 				CompileResult::WroteToRegister(destination)
 			},
 
-			Expression::BinaryOperation {..} => todo!()
+			Expression::BinaryOperation {..} => todo!(),
+
+			Expression::UnaryOperation {..} => todo!()
 		}
 	}
 

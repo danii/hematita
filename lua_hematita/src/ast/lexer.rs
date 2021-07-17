@@ -47,8 +47,8 @@ impl<T> Lexer<T>
 		let mut identifier = String::new();
 
 		loop {
-			match self.peek()? {
-				'a'..='z' | 'A'..='Z' => identifier.push(self.peeked_next()),
+			match self.peek() {
+				Some('a'..='z' | 'A'..='Z') => identifier.push(self.peeked_next()),
 				_ => break
 			}
 		}
@@ -112,9 +112,10 @@ impl<T> Lexer<T>
 	/// Parses a number, or, potentially, the subtraction operator.
 	fn parse_number(&mut self) -> Option<Token> {
 		let mut number = String::new();
-
+		
 		loop {
 			match self.peek() {
+				// TODO: - is impossible now.
 				Some('-') => if number.len() == 0 {
 					number.push(self.peeked_next())
 				} else {
@@ -126,7 +127,7 @@ impl<T> Lexer<T>
 		}
 
 		Some(if number == "-" {
-			Token::Subtract
+			Token::Minus
 		} else {
 			// TODO: Handle unwrap!
 			Token::Integer(number.parse().unwrap())
@@ -139,47 +140,94 @@ impl<T> Iterator for Lexer<T> where T: Iterator<Item = char> {
 
 	fn next(&mut self) -> Option<Token> {
 		Some(match self.parse_whitespace()? {
+			// TODO: Error handling on complex cases.
+			// Complex
+
+			// Single character token Other Assign (=)
+			// OR Double character token Relational Equal (==)
 			'=' => match {self.eat(); self.peek().unwrap()} {
 				'=' => {self.eat(); Token::Equal},
 				_ => Token::Assign
 			},
 
+			// Single character token Relational LessThan (<)
+			// OR Double character token Relational LessThanOrEqual (<=)
+			// OR Double character token Bitwise ShiftLeft (<<)
 			'<' => match {self.eat(); self.peek().unwrap()} {
 				'=' => {self.eat(); Token::LessThanOrEqual},
+				'<' => {self.eat(); Token::ShiftLeft},
 				_ => Token::LessThan
 			},
 
+			// Single character token Relational GreaterThan (>)
+			// OR Double character token Relational GreaterThanOrEqual (>=)
+			// OR Double character token Bitwise ShiftRight (>>)
 			'>' => match {self.eat(); self.peek().unwrap()} {
 				'=' => {self.eat(); Token::GreaterThanOrEqual},
+				'>' => {self.eat(); Token::ShiftRight},
 				_ => Token::GreaterThan
 			},
 
+			// Single character token Bitwise BitwiseNotOrXOr (~)
+			// OR Double character token Relational NotEqual (~=)
 			'~' => match {self.eat(); self.peek().unwrap()} {
 				'=' => {self.eat(); Token::NotEqual},
-				_ => todo!()
+				_ => Token::BitwiseNotOrXOr
 			},
 
-			'+' => {self.eat(); Token::Add},
-			'-' | '0'..='9' => self.parse_number().unwrap(),
+			// Single character token Arithmetic Divide (/)
+			// OR Double character token Arithmetic FloorDivide (//)
+			'/' => match {self.eat(); self.peek().unwrap()} {
+				'/' => {self.eat(); Token::FloorDivide},
+				_ => Token::FloorDivide
+			},
 
+			// Single character token Other Period (.)
+			// OR Double character token Other Concat (..)
+			//   OR Triple character token Other VarArgs (...) // TODO
 			'.' => match {self.eat(); self.peek().unwrap()} {
 				'.' => {self.eat(); Token::Concat},
 				_ => Token::Period
 			},
 
+			// Arithmetic
+			'+' => {self.eat(); Token::Add},
+			'-' => {self.eat(); Token::Minus},
+			'*' => {self.eat(); Token::Multiply},
+			// Divide and FloorDivide are complex tokens
+			'%' => {self.eat(); Token::Modulo},
+			'^' => {self.eat(); Token::Exponent},
+
+			// Bitwise
+			'&' => {self.eat(); Token::BitwiseAnd},
+			'|' => {self.eat(); Token::BitwiseOr},
+			// BitwiseNotOrXOr, ShiftLeft and ShiftRight are complex tokens
+
+			// Relational
+			// All relationals are complex tokens
+
+			// Other
+			// Other Assign is a complex token
 			':' => {self.eat(); Token::Colon},
+			',' => {self.eat(); Token::Comma},
+			// Other Period is a complex token
 			';' => {self.eat(); Token::SemiColon},
+			// Other Concat is a complex token
+			'#' => {self.eat(); Token::Length},
+
+			// Sectioning
 			'(' => {self.eat(); Token::OpenParen},
 			')' => {self.eat(); Token::CloseParen},
 			'{' => {self.eat(); Token::OpenCurly},
 			'}' => {self.eat(); Token::CloseCurly},
 			'[' => {self.eat(); Token::OpenBracket},
 			']' => {self.eat(); Token::CloseBracket},
-			',' => {self.eat(); Token::Comma},
-			'"' => self.parse_string().unwrap(),
-			'\'' => self.parse_string().unwrap(),
-			'\\' => todo!(),
-			_ => self.parse_identifier().unwrap()
+
+			// Literals
+			'"' => self.parse_string().unwrap(), // Double quoted strings
+			'\'' => self.parse_string().unwrap(), // Single quoted strings
+			'0'..='9' => self.parse_number().unwrap(), // Numbers
+			_ => self.parse_identifier().unwrap() // Most other literals
 		})
 	}
 }
@@ -191,32 +239,51 @@ pub enum Token {
 	Integer(i64),
 	String(String),
 
-	// Punctuation
-	Assign,
-	Colon,
-	Comma,
-	Period,
-	SemiColon,
+	// Literal Values
+	LiteralTrue,
+	LiteralFalse,
+	LiteralNil,
+
+	// Arithmetic
+	Add,
+	Minus,
+	Multiply,
+	Divide,
+	FloorDivide,
+	Modulo,
+	Exponent,
+
+	// Bitwise
+	BitwiseAnd,
+	BitwiseOr,
+	BitwiseNotOrXOr,
+	ShiftLeft,
+	ShiftRight,
+
+	// Relational
 	Equal,
 	NotEqual,
 	LessThan,
 	LessThanOrEqual,
 	GreaterThan,
 	GreaterThanOrEqual,
-	Add,
-	Subtract,
+
+	// Other
+	Assign,
+	Colon,
+	Comma,
+	Period,
+	SemiColon,
 	Concat,
+	Length,
+
+	// Sectioning
 	OpenParen,
 	CloseParen,
 	OpenCurly,
 	CloseCurly,
 	OpenBracket,
 	CloseBracket,
-
-	// Literal Values
-	LiteralTrue,
-	LiteralFalse,
-	LiteralNil,
 
 	// Keywords
 	KeywordAnd,
@@ -248,32 +315,51 @@ impl std::fmt::Display for Token {
 			Self::Integer(integer) => write!(f, "{}", integer),
 			Self::String(string) => write!(f, "{:?}", string),
 
-			// Punctuation
-			Self::Assign => write!(f, "="),
-			Self::Colon => write!(f, ":"),
-			Self::Comma => write!(f, ","),
-			Self::Period => write!(f, "."),
-			Self::SemiColon => write!(f, ";"),
+			// Literal Values
+			Self::LiteralTrue => write!(f, "true"),
+			Self::LiteralFalse => write!(f, "false"),
+			Self::LiteralNil => write!(f, "nil"),
+
+			// Arithmetic
+			Self::Add => write!(f, "+"),
+			Self::Minus => write!(f, "-"),
+			Self::Multiply => write!(f, "*"),
+			Self::Divide => write!(f, "/"),
+			Self::FloorDivide => write!(f, "//"),
+			Self::Modulo => write!(f, "%"),
+			Self::Exponent => write!(f, "^"),
+
+			// Bitwise
+			Self::BitwiseAnd => write!(f, "&"),
+			Self::BitwiseOr => write!(f, "|"),
+			Self::BitwiseNotOrXOr => write!(f, "~"),
+			Self::ShiftLeft => write!(f, "<<"),
+			Self::ShiftRight => write!(f, ">>"),
+
+			// Relational
 			Self::Equal => write!(f, "=="),
 			Self::NotEqual => write!(f, "~="),
 			Self::LessThan => write!(f, "<"),
 			Self::LessThanOrEqual => write!(f, "<="),
 			Self::GreaterThan => write!(f, ">"),
 			Self::GreaterThanOrEqual => write!(f, ">="),
-			Self::Add => write!(f, "+"),
-			Self::Subtract => write!(f, "-"),
+
+			// Other
+			Self::Assign => write!(f, "="),
+			Self::Colon => write!(f, ":"),
+			Self::Comma => write!(f, ","),
+			Self::Period => write!(f, "."),
+			Self::SemiColon => write!(f, ";"),
 			Self::Concat => write!(f, ".."),
+			Self::Length => write!(f, "#"),
+
+			// Sectioning
 			Self::OpenParen => write!(f, "("),
 			Self::CloseParen => write!(f, ")"),
 			Self::OpenCurly => write!(f, "{{"),
 			Self::CloseCurly => write!(f, "}}"),
 			Self::OpenBracket => write!(f, "["),
 			Self::CloseBracket => write!(f, "]"),
-
-			// Literal Values
-			Self::LiteralTrue => write!(f, "true"),
-			Self::LiteralFalse => write!(f, "false"),
-			Self::LiteralNil => write!(f, "nil"),
 
 			// Keywords
 			Self::KeywordAnd => write!(f, "and"),

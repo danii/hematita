@@ -60,7 +60,7 @@ struct StackFrame<'v, 'f> {
 }
 
 impl<'v, 'f> StackFrame<'v, 'f> {
-	fn read_reference<'s>(&mut self, reference: impl Into<Reference<'s>>)
+	fn read_reference<'s>(&self, reference: impl Into<Reference<'s>>)
 			-> NillableValue<Value> {
 		match reference.into() {
 			Reference::Global(name) => {
@@ -93,6 +93,31 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 			}
 		}
 	}
+
+	/*
+	fn metamethod(&self, object: usize, method: &str, left: NillableValue<Value>,
+			right: NillableValue<Value>) {
+		match self.read_reference(Reference::Local(object)) {
+			NonNil(Value::Integer(integer)) => {
+				let meta = self.virtual_machine.number_meta.as_ref().unwrap();
+				let meta = meta.data.lock().unwrap();
+				meta.get(&Value::new_string(method));
+			},
+			NonNil(Value::String(string)) => {
+				let meta = self.virtual_machine.string_meta.as_ref().unwrap();
+				let meta = meta.data.lock().unwrap();
+				meta.get(&Value::new_string(method));
+			},
+			NonNil(Value::Boolean(boolean)) => {
+				let meta = self.virtual_machine.boolean_meta.as_ref().unwrap();
+				let meta = meta.data.lock().unwrap();
+				meta.get(&Value::new_string(method));
+			},
+			NonNil(Value::Table(table)) => match table.metatable {
+				Some(metatable) => metatable
+			}
+		}
+	}*/
 
 	fn execute(&mut self, arguments: Arc<Table>) -> Result<Arc<Table>, String> {
 		// Set arguments.

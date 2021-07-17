@@ -7,6 +7,33 @@ use std::{
 	result::Result as STDResult
 };
 
+macro_rules! expression {
+	($($name:ident($next:ident)
+			{$($token:ident => $bin_op:ident),*}),*) => {
+		$(
+			fn $name<I>(iter: &mut TokenIterator<I>) -> Result<Expression>
+					where I: Iterator<Item = Token> {
+				let mut expression = $next(iter)?;
+
+				loop {
+					match iter.peek() {
+						$(Some(Token::$token) => {
+							iter.eat();
+
+							expression = Expression::BinaryOperation {
+								left: Box::new(expression),
+								operator: BinaryOperator::$bin_op,
+								right: Box::new($next(iter)?)
+							}
+						}),*
+						_ => break Ok(expression)
+					}
+				}
+			}
+		)*
+	}
+}
+
 macro_rules! expect {
 	($value:expr, $type:pat) => {
 		let value = $value;
@@ -183,61 +210,169 @@ pub fn parse(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 	}
 }
 
-pub fn parse_expression(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
-		-> Result<Expression> {
-	match iter.peek() {
-		// Literals
-		Some(Token::Identifier(_)) => {
-			let identifier = iter.identifier();
-			parse_inner_expression(iter, Expression::Identifier(identifier))
-		},
-		Some(Token::Integer(_)) => {
-			let integer = iter.integer();
-			parse_inner_expression(iter, Expression::Integer(integer))
-		},
-		Some(Token::String(_)) => {
-			let string = iter.string();
-			parse_inner_expression(iter, Expression::String(string))
-		},
+/*
+	Operator Precedence
 
-		// Function Call
-		Some(Token::OpenCurly) => parse_table(iter),
-		Some(Token::KeywordFunction) => {
-			let (_, arguments, body) = parse_function(iter, false)?;
-			Ok(Expression::Function {arguments, body})
-		},
-		Some(Token::LiteralNil) => {iter.eat(); Ok(Expression::Nil)},
-		Some(Token::LiteralTrue) => {iter.eat(); parse_inner_expression(iter, Expression::True)},
-		Some(Token::LiteralFalse) => {iter.eat(); Ok(Expression::False)},
-		_ => Err(Error(iter.next()))
+	or
+	and
+	< > <= >= ~= ==
+	|
+	~
+	&
+	<< >>
+	..
+	+ -
+	* / // %
+	not # - ~
+	^
+*/
+
+pub fn parse_expression<I>(iter: &mut TokenIterator<I>) -> Result<Expression>
+		where I: Iterator<Item = Token> {
+	parse_expression_logical_or(iter)
+}
+
+expression! {
+	parse_expression_logical_or(parse_expression_logical_and) {
+		KeywordOr => LogicalOr
+	},
+	parse_expression_logical_and(parse_expression_comparison) {
+		KeywordAnd => LogicalAnd
+	},
+	parse_expression_comparison(parse_expression_bitwise_or) {
+		LessThan => LessThan,
+		GreaterThan => GreaterThan,
+		LessThanOrEqual => LessThanOrEqual,
+		GreaterThanOrEqual => GreaterThanOrEqual
+	},
+	parse_expression_bitwise_or(parse_expression_bitwise_xor) {
+		BitwiseOr => BitwiseOr
+	},
+	parse_expression_bitwise_xor(parse_expression_bitwise_and) {
+		BitwiseNotOrXOr => BitwiseXOr
+	},
+	parse_expression_bitwise_and(parse_expression_bitwise_shift) {
+		BitwiseAnd => BitwiseAnd
+	},
+	parse_expression_bitwise_shift(parse_expression_concat) {
+		ShiftLeft => ShiftLeft,
+		ShiftRight => ShiftRight
+	},
+	parse_expression_term(parse_expression_factor) {
+		Add => Add,
+		Minus => Subtract
+	},
+	parse_expression_factor(parse_expression_unary) {
+		Multiply => Multiply,
+		Divide => Divide,
+		FloorDivide => FloorDivide,
+		Modulo => Modulo
 	}
 }
 
-pub fn parse_inner_expression(iter: &mut TokenIterator<impl Iterator<Item = Token>>,
-		actor: Expression) -> Result<Expression> {
-	match iter.peek() {
-		// actor <binary operation>
-		Some(Token::Equal | Token::NotEqual | Token::LessThan
-				| Token::LessThanOrEqual | Token::GreaterThan
-				| Token::GreaterThanOrEqual | Token::Add | Token::Subtract
-				| Token::KeywordAnd | Token::KeywordOr) =>
-					Ok(Expression::BinaryOperation {
-			left: Box::new(actor),
-			operator: match iter.next().unwrap() {
-				Token::Equal => BinaryOperator::Equal,
-				Token::NotEqual => BinaryOperator::NotEqual,
-				Token::LessThan => BinaryOperator::LessThan,
-				Token::LessThanOrEqual => BinaryOperator::LessThanOrEqual,
-				Token::GreaterThan => BinaryOperator::GreaterThan,
-				Token::GreaterThanOrEqual => BinaryOperator::GreaterThanOrEqual,
-				Token::Add => BinaryOperator::Add,
-				Token::KeywordAnd => BinaryOperator::And,
-				Token::KeywordOr => BinaryOperator::Or,
-				_ => unreachable!()
-			},
-			right: Box::new(parse_expression(iter)?)
-		}),
+// Note the right associativity.
+pub fn parse_expression_concat<I>(iter: &mut TokenIterator<I>)
+		-> Result<Expression> where I: Iterator<Item = Token> {
+	let mut expression = parse_expression_term(iter)?;
 
+	loop {
+		if let Some(Token::Concat) = iter.peek() {
+			iter.eat();
+
+			expression = Expression::BinaryOperation {
+				left: Box::new(expression),
+				operator: BinaryOperator::Concat,
+				right: Box::new(parse_expression_concat(iter)?)
+			}
+		} else {break Ok(expression)}
+	}
+}
+
+// Uses recursion over loops.
+pub fn parse_expression_unary<I>(iter: &mut TokenIterator<I>)
+		-> Result<Expression> where I: Iterator<Item = Token> {
+	Ok(match iter.peek() {
+		Some(Token::KeywordNot) => Expression::UnaryOperation {
+			operator: UnaryOperator::LogicalNot,
+			operand: Box::new(parse_expression_unary(iter)?)
+		},
+
+		Some(Token::Length) => Expression::UnaryOperation {
+			operator: UnaryOperator::Length,
+			operand: Box::new(parse_expression_unary(iter)?)
+		},
+
+		Some(Token::Minus) => Expression::UnaryOperation {
+			operator: UnaryOperator::Negate,
+			operand: Box::new(parse_expression_unary(iter)?)
+		},
+
+		Some(Token::BitwiseNotOrXOr) => Expression::UnaryOperation {
+			operator: UnaryOperator::BitwiseNot,
+			operand: Box::new(parse_expression_unary(iter)?)
+		},
+
+		_ => parse_expression_exponent(iter)?
+	})
+}
+
+// Again, note the right associativity.
+pub fn parse_expression_exponent<I>(iter: &mut TokenIterator<I>)
+		-> Result<Expression> where I: Iterator<Item = Token> {
+	let mut expression = parse_expression_primary(iter)?;
+
+	loop {
+		if let Some(Token::Exponent) = iter.peek() {
+			iter.eat();
+			expression = Expression::BinaryOperation {
+				left: Box::new(expression),
+				operator: BinaryOperator::Exponent,
+				right: Box::new(parse_expression_exponent(iter)?)
+			}
+		} else {break Ok(expression)}
+	}
+}
+
+pub fn parse_expression_primary<I>(iter: &mut TokenIterator<I>)
+			-> Result<Expression> where I: Iterator<Item = Token> {
+	Ok(match iter.peek() {
+		// Literals
+		Some(Token::Identifier(_)) => {
+			let identifier = iter.identifier(); // Ugh
+			parse_expression_inner(iter, Expression::Identifier(identifier))?
+		},
+		Some(Token::Integer(_)) => Expression::Integer(iter.integer()),
+		Some(Token::String(_)) => Expression::String(iter.string()),
+
+		// Simple literals
+		Some(Token::LiteralNil) => {iter.eat(); Expression::Nil},
+		Some(Token::LiteralTrue) => {iter.eat(); Expression::True},
+		Some(Token::LiteralFalse) => {iter.eat(); Expression::False},
+
+		// Parenthesis
+		Some(Token::OpenParen) => {
+			iter.eat();
+			let expression = parse_expression(iter)?;
+			expect!(iter.next(), Token::CloseParen);
+			parse_expression_inner(iter, expression)?
+		},
+
+		// Complex literals
+		Some(Token::OpenCurly) => parse_table(iter)?,
+		Some(Token::KeywordFunction) => {
+			let (_, arguments, body) = parse_function(iter, false)?;
+			Expression::Function {arguments, body}
+		},
+
+		_ => return Err(Error(iter.next()))
+	})
+}
+
+/// Only literals and expressions in parenthesis run this function after being
+/// parsed.
+pub fn parse_expression_inner<I>(iter: &mut TokenIterator<I>, actor: Expression)
+		-> Result<Expression> where I: Iterator<Item = Token> {
+	match iter.peek() {
 		// actor()
 		Some(Token::OpenParen) => {
 			let mut first = true;
@@ -254,21 +389,21 @@ pub fn parse_inner_expression(iter: &mut TokenIterator<impl Iterator<Item = Toke
 			}).try_collect()?;
 
 			let function = Box::new(actor);
-			parse_inner_expression(iter, Expression::Call {function, arguments})
+			parse_expression_inner(iter, Expression::Call {function, arguments})
 		},
 
 		// actor "string"
 		Some(Token::String(_)) => {
 			let arguments = vec![Expression::String(iter.string())];
 			let function = Box::new(actor);
-			parse_inner_expression(iter, Expression::Call {function, arguments})
+			parse_expression_inner(iter, Expression::Call {function, arguments})
 		},
 
 		// actor {"table"}
 		Some(Token::OpenCurly) => {
 			let arguments = vec![parse_table(iter)?];
 			let function = Box::new(actor);
-			parse_inner_expression(iter, Expression::Call {function, arguments})
+			parse_expression_inner(iter, Expression::Call {function, arguments})
 		},
 
 		// actor.
@@ -276,7 +411,7 @@ pub fn parse_inner_expression(iter: &mut TokenIterator<impl Iterator<Item = Toke
 			// actor.identifier
 			Some(Token::Identifier(_)) => {
 				let index = Box::new(Expression::String(iter.identifier()));
-				parse_inner_expression(iter, Expression::Index {
+				parse_expression_inner(iter, Expression::Index {
 					index, indexee: Box::new(actor)
 				})
 			},
@@ -290,11 +425,11 @@ pub fn parse_inner_expression(iter: &mut TokenIterator<impl Iterator<Item = Toke
 			iter.eat();
 
 			let index = Box::new(parse_expression(iter)?);
-			let result = parse_inner_expression(iter, Expression::Index {
+			let result = parse_expression_inner(iter, Expression::Index {
 				index, indexee: Box::new(actor)
 			})?;
 			match iter.next() {
-				Some(Token::CloseBracket) => parse_inner_expression(iter, result),
+				Some(Token::CloseBracket) => parse_expression_inner(iter, result),
 				token => Err(Error(token))
 			}
 		},
@@ -772,6 +907,12 @@ pub enum Expression {
 		left: Box<Expression>,
 		operator: BinaryOperator,
 		right: Box<Expression>
+	},
+
+	/// A unary operation.
+	UnaryOperation {
+		operator: UnaryOperator,
+		operand: Box<Expression>
 	}
 }
 
@@ -835,7 +976,13 @@ impl Display for Expression {
 			Self::Index {indexee, index} => write!(f, "{}[{}]", indexee, index),
 
 			Self::BinaryOperation {left, operator, right} =>
-				write!(f, "{} {} {}", left, operator, right)
+				write!(f, "{} {} {}", left, operator, right),
+
+			Self::UnaryOperation {operator: UnaryOperator::LogicalNot, operand} =>
+				write!(f, "not {}", operand),
+
+			Self::UnaryOperation {operator, operand} =>
+				write!(f, "{}{}", operator, operand)
 		}
 	}
 }
@@ -854,37 +1001,106 @@ pub struct KeyValue {
 
 // TODO: Should we remove [crate::vm::BinaryOperation] and use this instead?
 // Same goes for UnaryOperator and Operation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum BinaryOperator {
+	// Arithmetic
+	Add,
+	Subtract,
+	Multiply,
+	Divide,
+	FloorDivide,
+	Modulo,
+	Exponent,
+
+	// Bitwise
+	BitwiseAnd,
+	BitwiseOr,
+	BitwiseXOr,
+	ShiftLeft,
+	ShiftRight,
+
+	// Relational
 	Equal,
 	NotEqual,
 	LessThan,
 	LessThanOrEqual,
 	GreaterThan,
 	GreaterThanOrEqual,
-	Add,
-	Subtract,
-	Multiply,
-	Divide,
-	And,
-	Or
+
+	// Logical
+	LogicalAnd,
+	LogicalOr,
+
+	// Other
+	Concat
 }
 
 impl Display for BinaryOperator {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		match self {
+			// Arithmetic
+			Self::Add => write!(f, "+"),
+			Self::Subtract => write!(f, "-"),
+			Self::Multiply => write!(f, "*"),
+			Self::Divide => write!(f, "/"),
+			Self::FloorDivide => write!(f, "//"),
+			Self::Modulo => write!(f, "%"),
+			Self::Exponent => write!(f, "^"),
+
+			// Bitwise
+			Self::BitwiseAnd => write!(f, "&"),
+			Self::BitwiseOr => write!(f, "|"),
+			Self::BitwiseXOr => write!(f, "~"),
+			Self::ShiftLeft => write!(f, "<<"),
+			Self::ShiftRight => write!(f, ">>"),
+
+			// Relational
 			Self::Equal => write!(f, "=="),
 			Self::NotEqual => write!(f, "~="),
 			Self::LessThan => write!(f, "<"),
 			Self::LessThanOrEqual => write!(f, "<="),
 			Self::GreaterThan => write!(f, ">"),
 			Self::GreaterThanOrEqual => write!(f, ">="),
-			Self::Add => write!(f, "+"),
-			Self::Subtract => write!(f, "-"),
-			Self::Multiply => write!(f, "*"),
-			Self::Divide => write!(f, "/"),
-			Self::And => write!(f, "and"),
-			Self::Or => write!(f, "or")
+
+			// Logical
+			Self::LogicalAnd => write!(f, "and"),
+			Self::LogicalOr => write!(f, "or"),
+
+			// Other
+			Self::Concat => write!(f, "..")
+		}
+	}
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum UnaryOperator {
+	// Arithmetic
+	Negate,
+
+	// Bitwise
+	BitwiseNot,
+
+	// Logical
+	LogicalNot,
+
+	// Other
+	Length
+}
+
+impl Display for UnaryOperator {
+	fn fmt(&self, f: &mut Formatter) -> FMTResult {
+		match self {
+			// Arithmetic
+			Self::Negate => write!(f, "-"),
+
+			// Bitwise
+			Self::BitwiseNot => write!(f, "~"),
+
+			// Logical
+			Self::LogicalNot => write!(f, "not"),
+
+			// Other
+			Self::Length => write!(f, "#")
 		}
 	}
 }
