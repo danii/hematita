@@ -10,7 +10,7 @@ These features require modification to the compiler, involving changes to the le
 | Method Definition            | parser & codegen   | <pre lang="lua">function Class:setCounter(x)<br>  self.counter = x<br>end</pre>               |
 | No Parenthesis Function Call | :heavy_check_mark: | <pre lang="lua">print "Hello"<br>print {1, 2, 3}</pre>                                        |
 | Method Call                  | parser & codegen   | <pre lang="lua">local class = Class()<br>class:setCounter(4)</pre>                            |
-| Order Of Operations          | parser             | <pre lang="lua">-- Prints 7 like a well behaved interpreter should.<br>print(1 + 2 * 3)</pre> |
+| Order Of Operations          | :heavy_check_mark: | <pre lang="lua">-- Prints 7 like a well behaved interpreter should.<br>print(1 + 2 * 3)</pre> |
 | Binary Operators             | codegen            | <pre lang="lua">print(1 == 1 and 2 ~= 3)</pre>                                                |
 | Unary Operators              | parser & codegen   | <pre lang="lua">print(not ~8)</pre>                                                           |
 
@@ -18,13 +18,13 @@ Virtual Machine
 ---------------
 These features require modification to the virtual machine and it's opcodes, and occasionally the code generator. These typically have to do with how the language acts.
 
-| Feature           | Remaining Systems         | Technical Notes                                                                                                |
-| ----------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Global Scope      | virtual machine & codegen | Currently, globals can be accessed but they cannot be assigned to or modified.                                 |
-| Userdata          | virtual machine           | Userdata, AKA native types currently do not exist in any capacity.                                             |
-| Native Functions  | :heavy_check_mark:        | While native functions are complete, arguments to them may need to be reworked, see upvalue's technical notes. |
-| Upvalues          | virtual machine & codegen | In order to properly implement upvalues, a rework of local variables needs to be completed.                    |
-| Metatables        | virtual machine           | Metatables do exist, but not all operations use the metamethods on a table's metatable.                        |
+| Feature          | Remaining Systems  | Technical Notes                                                                                                |
+| ---------------- | ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Global Scope     | :heavy_check_mark: | Currently, globals can be accessed but they cannot be assigned to or modified.                                 |
+| Userdata         | virtual machine    | Userdata, AKA native types currently do not exist in any capacity.                                             |
+| Native Functions | :heavy_check_mark: | While native functions are complete, arguments to them may need to be reworked, see upvalue's technical notes. |
+| Upvalues         | :heavy_check_mark: | In order to properly implement upvalues, a rework of local variables needs to be completed.                    |
+| Metatables       | :heavy_check_mark: | Metatables do exist, but not all operations use the metamethods on a table's metatable.                        |
 
 Project Structure
 -----------------
