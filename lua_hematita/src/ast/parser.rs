@@ -60,7 +60,7 @@ macro_rules! iter_throw {
 pub type Result<T> = STDResult<T, Error>;
 
 #[derive(Debug)]
-pub struct Error(Option<Token>);
+pub struct Error(pub Option<Token>);
 
 impl STDError for Error {}
 
