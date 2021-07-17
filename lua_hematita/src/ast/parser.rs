@@ -852,6 +852,7 @@ impl Display for Statement {
 
 // TODO: Clone? Why?
 #[derive(Clone, Debug)]
+#[warn(clippy::large_enum_variant)]
 pub enum Expression {
 	// La identifier
 

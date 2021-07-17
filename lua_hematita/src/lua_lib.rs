@@ -1,6 +1,7 @@
 use self::super::vm::value::{IntoNillableValue, Table, Value};
-use std::{collections::HashMap, sync::Arc};
 use itertools::Itertools;
+use maplit::hashmap;
+use std::{collections::HashMap, sync::Arc};
 
 pub fn table_to_vector(table: &Table) -> Vec<Option<Value>> {
 	let table = table.data.lock().unwrap();
@@ -123,4 +124,11 @@ pub fn r#type(arguments: Arc<Table>, _: Arc<Table>)
 	let r#type = arguments.get(0).cloned().flatten().nillable().type_name();
 	let result = vec![Some(Value::String(r#type.to_owned().into_boxed_str()))];
 	Ok(Table::from_hashmap(vector_to_table(result)).arc())
+}
+
+pub fn standard_globals() -> Table {
+	Table::from_hashmap(hashmap! {
+		Value::new_string("print") =>
+			Value::NativeFunction(print)
+	})
 }
