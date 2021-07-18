@@ -20,28 +20,27 @@ impl Display for Constant {
 	}
 }
 
-impl From<KnownValue> for Constant {
-	fn from(known: KnownValue) -> Self {
-		match known {
-			KnownValue::String(string) => Self::String(string),
-			KnownValue::Integer(integer) => Self::Integer(integer),
-			KnownValue::Boolean(boolean) => Self::Boolean(boolean)
-		}
-	}
-}
-
+/// Data with a known type and value at compile time.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum KnownValue {
 	String(String),
 	Integer(i64),
-	Boolean(bool)
+	Boolean(bool),
+	Nil
 }
 
 impl KnownValue {
-	pub fn coerce_to_bool(self) -> bool {
+	pub fn coerce_to_bool(&self) -> bool {
 		match self {
-			Self::Boolean(value) => value,
+			Self::Boolean(value) => *value,
+			Self::Nil => false,
 			_ => true
 		}
+	}
+}
+
+impl From<i64> for KnownValue {
+	fn from(integer: i64) -> Self {
+		Self::Integer(integer)
 	}
 }

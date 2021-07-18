@@ -8,9 +8,10 @@ use std::{
 };
 
 macro_rules! expression {
-	($($name:ident($next:ident)
+	($($(#[$($attrib:tt)*])* $name:ident($next:ident)
 			{$($token:ident => $bin_op:ident),*}),*) => {
 		$(
+			$(#[$($attrib)*])*
 			fn $name<I>(iter: &mut TokenIterator<I>) -> Result<Expression>
 					where I: Iterator<Item = Token> {
 				let mut expression = $next(iter)?;
@@ -73,6 +74,11 @@ impl Display for Error {
 	}
 }
 
+/// A wrapped peekable iterator of tokens with specialized methods for parsing.
+///
+/// This is made for having a mutable reference to it be passed around between
+/// parsing functions, and being peeked and consumed token by token via helper
+/// methods.
 pub struct TokenIterator<I>(pub Peekable<I>)
 	where I: Iterator<Item = Token>;
 
@@ -233,6 +239,7 @@ pub fn parse_expression<I>(iter: &mut TokenIterator<I>) -> Result<Expression>
 }
 
 expression! {
+	/// Test
 	parse_expression_logical_or(parse_expression_logical_and) {
 		KeywordOr => LogicalOr
 	},

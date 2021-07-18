@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! Lua Hematita is an interpreter for the scripting language Lua, written
+//! Hematita Da Lua is an interpreter for the scripting language Lua, written
 //! entirely in 100% safe Rust. Hematita is the portugese word for hematite, a
 //! type of iron oxide, or rust, and lua is the portugese word for moon. 'Lua
 //! Hematita' is a pin on what this project is, and the discovery that [iron on

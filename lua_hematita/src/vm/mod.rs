@@ -12,6 +12,7 @@ use self::{
 use std::{
 	cmp::max,
 	collections::HashMap,
+	convert::TryFrom,
 	fmt::{Display, Formatter, Result as FMTResult},
 	sync::Arc
 };
@@ -322,20 +323,6 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 						let result = self.call(meta, Table::array([&left, &right]).arc())?;
 						result.index(&Value::Integer(1))
 					},
-
-					// TODO: These should be compiler constructs because of short circuit
-					// evaluation.
-					// Logical
-
-					// And
-					(left, right, BinaryOperation::LogicalAnd) =>
-						if left.coerce_to_bool() && right.coerce_to_bool() {right}
-						else {left},
-
-					// Or
-					(left, right, BinaryOperation::LogicalOr) =>
-						if left.coerce_to_bool() {left}
-						else {right},
 
 					// TODO: Better error handling...
 					_ => return Err("unknown binary operation error".to_owned())
@@ -675,8 +662,8 @@ impl<'s> Display for OpCode<'s> {
 				write!(f, "crt {}", destination),
 			Self::BinaryOperation {..} =>
 				write!(f, "biop"),
-			Self::UnaryOperation {..} =>
-				write!(f, "unop"),
+			Self::UnaryOperation {operand, destination, ..} =>
+				write!(f, "unop {} {}", operand, destination),
 			Self::Jump {operation, r#if: None} =>
 				write!(f, "jmp {}", operation),
 			Self::Jump {operation, r#if: Some(r#if)} =>
@@ -729,17 +716,15 @@ pub enum BinaryOperation {
 	GreaterThan,
 	GreaterThanOrEqual,
 
-	// Logical
-	LogicalAnd,
-	LogicalOr,
-
 	// Other
 	Concat
 }
 
-impl From<BinaryOperator> for BinaryOperation {
-	fn from(ast: BinaryOperator) -> Self {
-		match ast {
+impl TryFrom<BinaryOperator> for BinaryOperation {
+	type Error = ();
+
+	fn try_from(ast: BinaryOperator) -> Result<Self, ()> {
+		Ok(match ast {
 			// Arithmetic
 			BinaryOperator::Add => Self::Add,
 			BinaryOperator::Subtract => Self::Subtract,
@@ -764,13 +749,10 @@ impl From<BinaryOperator> for BinaryOperation {
 			BinaryOperator::GreaterThan => Self::GreaterThan,
 			BinaryOperator::GreaterThanOrEqual => Self::GreaterThanOrEqual,
 
-			// Logical
-			BinaryOperator::LogicalAnd => Self::LogicalAnd,
-			BinaryOperator::LogicalOr => Self::LogicalOr,
-
 			// Other
-			BinaryOperator::Concat => Self::Concat
-		}
+			BinaryOperator::Concat => Self::Concat,
+			_ => return Err(())
+		})
 	}
 }
 
