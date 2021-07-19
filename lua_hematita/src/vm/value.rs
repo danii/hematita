@@ -94,7 +94,7 @@ impl Display for Value {
 			Self::Boolean(boolean) => write!(f, "{}", boolean),
 			Self::Table(table) => write!(f, "{}", table),
 			Self::Function(function) => write!(f, "{}", function),
-			Self::NativeFunction(function) => write!(f, "function: {:p}", function)
+			Self::NativeFunction(function) => write!(f, "function: {:p}", *function)
 		}
 	}
 }

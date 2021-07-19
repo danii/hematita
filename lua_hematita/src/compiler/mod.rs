@@ -198,7 +198,28 @@ impl Generator {
 
 				Statement::NumericFor {..} => todo!(),
 
-				Statement::While {..} => todo!(),
+				Statement::While {block, condition, run_first: false} => {
+					let operation = self.opcodes.len() as u64;
+					let operand = self.compile_expression(condition).register(self);
+					self.opcode(OpCode::UnaryOperation {operand, destination: operand,
+						operation: UnaryOperation::LogicalNot});
+					let jump = self.opcodes.len();
+					self.opcode(OpCode::NoOp);
+					
+					self.compile(block);
+					self.opcode(OpCode::Jump {operation, r#if: None});
+					self.opcodes[jump] = OpCode::Jump {operation: self.opcodes.len() as u64, r#if: Some(operand)}
+				},
+
+				Statement::While {block, condition, run_first: true} => {
+					let operation = self.opcodes.len() as u64;
+					self.compile(block);
+
+					let operand = self.compile_expression(condition).register(self);
+					self.opcode(OpCode::UnaryOperation {operand, destination: operand,
+						operation: UnaryOperation::LogicalNot});
+					self.opcode(OpCode::Jump {operation, r#if: Some(operand)});
+				},
 
 				Statement::Return {values} => {
 					let destination = self.register();

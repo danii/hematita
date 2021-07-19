@@ -324,6 +324,10 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 						result.index(&Value::Integer(1))
 					},
 
+					// Relational
+
+					
+
 					// TODO: Better error handling...
 					_ => return Err("unknown binary operation error".to_owned())
 				}),
