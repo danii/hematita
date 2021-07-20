@@ -5,6 +5,7 @@ use std::{
 	collections::HashMap,
 	fmt::{Debug, Display, Formatter, Result as FMTResult},
 	hash::{Hash, Hasher},
+	ptr::eq,
 	sync::{Arc, Mutex}
 };
 
@@ -330,6 +331,12 @@ impl Table {
 	}
 }
 
+impl PartialEq for Table {
+	fn eq(&self, other: &Table) -> bool {
+		eq(self, other)
+	}
+}
+
 impl Display for Table {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		write!(f, "table: {:p}", &self)
@@ -347,6 +354,14 @@ impl Function {
 		Arc::new(self)
 	}
 }
+
+impl PartialEq for Function {
+	fn eq(&self, other: &Function) -> bool {
+		eq(self, other)
+	}
+}
+
+impl Eq for Function {}
 
 impl Display for Function {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {

@@ -17,6 +17,36 @@ use std::{
 	sync::Arc
 };
 
+macro_rules! binary_relational {
+	($self:ident, $left:ident, $right:ident, $name:ident, $rust_op:tt,
+			$reverse:literal) => {{
+		match ($left, $right) {
+			// Primitive comparisons.
+			(NonNil(Value::Integer(left)), NonNil(Value::Integer(right))) =>
+				NonNil(Value::Boolean(left $rust_op right)),
+			(NonNil(Value::String(left)), NonNil(Value::String(right))) =>
+				NonNil(Value::Boolean(left $rust_op right)),
+
+			(left, right)
+					if $self.meta_method(&left, stringify!($name)).is_non_nil() => {
+				let meta = $self.meta_method(&left, stringify!($name));
+				let arguments = if $reverse {[&right, &left]} else {[&left, &right]};
+				let result = $self.call(meta, Table::array(arguments).arc())?;
+				NonNil(result.index(&Value::Integer(1)).coerce_to_boolean())
+			},
+			(left, right)
+					if $self.meta_method(&right, stringify!($name)).is_non_nil() => {
+				let meta = $self.meta_method(&left, stringify!($name));
+				let arguments = if $reverse {[&right, &left]} else {[&left, &right]};
+				let result = $self.call(meta, Table::array(arguments).arc())?;
+				NonNil(result.index(&Value::Integer(1)).coerce_to_boolean())
+			},
+
+			_ => return Err("unknown binary operation error".to_owned())
+		}
+	}}
+}
+
 #[derive(Clone, Copy)]
 enum Reference<'s> {
 	Local(usize),
@@ -326,7 +356,52 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 
 					// Relational
 
-					
+					// Equal
+					(Nil, Nil, BinaryOperation::Equal) => NonNil(Value::Boolean(true)),
+					(NonNil(Value::Integer(left)), NonNil(Value::Integer(right)),
+						BinaryOperation::Equal) => NonNil(Value::Boolean(left == right)),
+					(NonNil(Value::Boolean(left)), NonNil(Value::Boolean(right)),
+						BinaryOperation::Equal) => NonNil(Value::Boolean(left == right)),
+					(NonNil(Value::String(left)), NonNil(Value::String(right)),
+						BinaryOperation::Equal) => NonNil(Value::Boolean(left == right)),
+					(NonNil(Value::Function(left)), NonNil(Value::Function(right)),
+						BinaryOperation::Equal) => NonNil(Value::Boolean(left == right)),
+					(NonNil(Value::NativeFunction(left)),
+						NonNil(Value::NativeFunction(right)), BinaryOperation::Equal) =>
+							NonNil(Value::Boolean(left == right)),
+					(left @ NonNil(Value::Table(_)), right @ NonNil(Value::Table(_)),
+							BinaryOperation::Equal) if self.meta_method(&left, "__eq")
+								.is_non_nil() => {
+						let meta = self.meta_method(&left, "__eq");
+						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						result.index(&Value::Integer(1))
+					},
+					(left @ NonNil(Value::Table(_)), right @ NonNil(Value::Table(_)),
+							BinaryOperation::Equal) if self.meta_method(&right, "__eq")
+								.is_non_nil() => {
+						let meta = self.meta_method(&right, "__eq");
+						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						result.index(&Value::Integer(1))
+					},
+					(NonNil(Value::Table(left)), NonNil(Value::Table(right)),
+						BinaryOperation::Equal) => NonNil(Value::Boolean(left == right)),
+					(_, _, BinaryOperation::Equal) => NonNil(Value::Boolean(false)),
+
+					// Less Than
+					(left, right, BinaryOperation::LessThan) =>
+						binary_relational!(self, left, right, __lt, <, false),
+
+					// Less Than Or Equal
+					(left, right, BinaryOperation::LessThanOrEqual) =>
+						binary_relational!(self, left, right, __le, <=, false),
+
+					// Greater Than
+					(left, right, BinaryOperation::GreaterThan) =>
+						binary_relational!(self, left, right, __lt, >, true),
+
+					// Greater Than Or Equal
+					(left, right, BinaryOperation::GreaterThanOrEqual) =>
+						binary_relational!(self, left, right, __le, >=, true),
 
 					// TODO: Better error handling...
 					_ => return Err("unknown binary operation error".to_owned())
@@ -664,8 +739,8 @@ impl<'s> Display for OpCode<'s> {
 				write!(f, "idxw {} {} {}", indexee, index, value),
 			Self::Create {destination} =>
 				write!(f, "crt {}", destination),
-			Self::BinaryOperation {..} =>
-				write!(f, "biop"),
+			Self::BinaryOperation {left, right, destination, ..} =>
+				write!(f, "biop {} {} {}", left, right, destination),
 			Self::UnaryOperation {operand, destination, ..} =>
 				write!(f, "unop {} {}", operand, destination),
 			Self::Jump {operation, r#if: None} =>
