@@ -1,6 +1,6 @@
 use self::super::{
 	ast::parser::{BinaryOperator, Block, Expression, KeyValue, Statement},
-	vm::{constant::{Constant, KnownValue}, Chunk, OpCode, UnaryOperation}
+	vm::{constant::{Constant, KnownValue}, Chunk, BinaryOperation, OpCode, UnaryOperation}
 };
 use std::{collections::HashMap, convert::TryInto};
 
@@ -165,11 +165,16 @@ impl Generator {
 								r#if: Some(variable),
 								operation: self.opcodes.len() as u64
 							};
+							// TODO: Everytime we add a jump opcode we have to add this or
+							// else internal state gets funky. Need a better long term
+							// solution..
+							self.registers.iter_mut().for_each(|value| *value = None);
 							self.compile(then);
 							self.opcodes[jump_done] = OpCode::Jump {
 								r#if: None,
 								operation: self.opcodes.len() as u64
 							};
+							self.registers.iter_mut().for_each(|value| *value = None);
 						},
 						None => {
 							// UnaryOperation not local To local
@@ -186,6 +191,7 @@ impl Generator {
 							self.opcode(OpCode::NoOp);
 							self.compile(then);
 
+							self.registers.iter_mut().for_each(|value| *value = None);
 							self.opcodes[jump] = OpCode::Jump {
 								r#if: Some(variable),
 								operation: self.opcodes.len() as u64
@@ -194,9 +200,65 @@ impl Generator {
 					}
 				},
 
-				Statement::GenericFor {..} => todo!(),
+				Statement::GenericFor {variable, iterator, r#do} => {
+					let top = self.opcodes.len() as u64;
+					let function = self.compile_expression(iterator).register(self);
+					let arguments = self.register();
 
-				Statement::NumericFor {..} => todo!(),
+					self.opcode(OpCode::Create {destination: arguments});
+					//let index = self.compile_known(2 as i64);
+					//self.opcode(OpCode::IndexWrite {indexee: arguments, index, value})
+
+					let destination = self.register();
+					let index = self.compile_known(1 as i64);
+					self.opcode(OpCode::Call {function, arguments, destination});
+					self.opcode(OpCode::IndexRead {indexee: destination,
+						index, destination});
+					let condition = self.register();
+					let right = self.compile_known(KnownValue::Nil);
+					self.opcode(OpCode::BinaryOperation {left: destination, right,
+						operation: BinaryOperation::Equal, destination: condition});
+					let done = self.opcodes.len();
+					self.opcode(OpCode::NoOp);
+
+					self.variables_to_registers.insert(variable.clone(), destination);
+					self.compile(r#do);
+					self.opcode(OpCode::Jump {operation: top, r#if: None});
+
+					self.opcodes[done] = OpCode::Jump {
+						operation: self.opcodes.len() as u64, r#if: Some(condition)};
+					self.registers.iter_mut().for_each(|value| *value = None);
+				},
+
+				Statement::NumericFor {variable, first, step, limit, r#do} => {
+					let value = self.compile_expression(first).register(self);
+					let limit = self.compile_expression(limit).register(self);
+					let step = self.compile_expression(step).register(self);
+					let condition = self.register();
+
+					let value = {
+						let new = self.register();
+						self.opcode(OpCode::ReAssign {actor: value, destination: new});
+						new
+					};
+
+					let operation = self.opcodes.len() as u64;
+					self.opcode(OpCode::BinaryOperation {left: value, right: limit,
+						operation: BinaryOperation::Equal, destination: condition});
+					let jump = self.opcodes.len();
+					self.opcode(OpCode::NoOp);
+					self.registers.iter_mut().for_each(|value| *value = None);
+
+					self.variables_to_registers.insert(variable.clone(), value);
+					self.compile(r#do);
+					self.opcode(OpCode::BinaryOperation {left: value, right: step,
+						operation: BinaryOperation::Add, destination: value});
+					self.opcode(OpCode::Jump {operation, r#if: None});
+
+					self.opcodes[jump] = OpCode::Jump {r#if: Some(condition),
+						operation: self.opcodes.len() as u64};
+					self.registers.iter_mut().for_each(|value| *value = None);
+				},
 
 				Statement::While {block, condition, run_first: false} => {
 					let operation = self.opcodes.len() as u64;
@@ -208,7 +270,8 @@ impl Generator {
 					
 					self.compile(block);
 					self.opcode(OpCode::Jump {operation, r#if: None});
-					self.opcodes[jump] = OpCode::Jump {operation: self.opcodes.len() as u64, r#if: Some(operand)}
+					self.opcodes[jump] = OpCode::Jump {operation: self.opcodes.len() as u64, r#if: Some(operand)};
+					self.registers.iter_mut().for_each(|value| *value = None);
 				},
 
 				Statement::While {block, condition, run_first: true} => {
@@ -219,6 +282,7 @@ impl Generator {
 					self.opcode(OpCode::UnaryOperation {operand, destination: operand,
 						operation: UnaryOperation::LogicalNot});
 					self.opcode(OpCode::Jump {operation, r#if: Some(operand)});
+					self.registers.iter_mut().for_each(|value| *value = None);
 				},
 
 				Statement::Return {values} => {
@@ -486,6 +550,7 @@ impl Generator {
 					self.opcode(OpCode::ReAssign {actor: right, destination: left});
 					let operation = self.opcodes.len() as u64;
 					self.opcodes[jump] = OpCode::Jump {operation, r#if: Some(boolean)};
+					self.registers.iter_mut().for_each(|value| *value = None);
 
 					CompileResult::Register(left)
 				}
@@ -510,6 +575,7 @@ impl Generator {
 					self.opcode(OpCode::ReAssign {actor: right, destination: left});
 					let operation = self.opcodes.len() as u64;
 					self.opcodes[jump] = OpCode::Jump {operation, r#if: Some(left)};
+					self.registers.iter_mut().for_each(|value| *value = None);
 
 					CompileResult::Register(left)
 				}

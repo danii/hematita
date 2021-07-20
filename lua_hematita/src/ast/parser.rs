@@ -603,7 +603,7 @@ pub fn parse_for(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 		Some(Token::Assign) => {
 			let first = parse_expression(iter)?;
 			expect!(iter.next(), Token::Comma);
-			let condition = parse_expression(iter)?;
+			let limit = parse_expression(iter)?;
 
 			let step = match iter.next() {
 				Some(Token::Comma) => {
@@ -617,7 +617,7 @@ pub fn parse_for(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 
 			let r#do = parse(iter)?;
 			expect!(iter.next(), Token::KeywordEnd);
-			Ok(Statement::NumericFor {variable, first, condition, step, r#do})
+			Ok(Statement::NumericFor {variable, first, limit, step, r#do})
 		},
 
 		// for item in iter do
@@ -743,8 +743,8 @@ pub enum Statement {
 		/// The first value.
 		first: Expression,
 
-		/// The condition.
-		condition: Expression,
+		/// The limit.
+		limit: Expression,
 
 		/// The amount to step.
 		step: Expression,
@@ -815,8 +815,8 @@ impl Display for Statement {
 
 			Self::GenericFor {variable, iterator, r#do} =>
 				write!(f, "for {} in {} do\n{}end", variable, iterator, r#do),
-			Self::NumericFor {variable, first, condition, step, r#do} =>
-				write!(f, "for {} = {}, {}, {} do\n{}end", variable, first, condition,
+			Self::NumericFor {variable, first, limit, step, r#do} =>
+				write!(f, "for {} = {}, {}, {} do\n{}end", variable, first, limit,
 					step, r#do),
 			Self::While {condition, block, run_first: false} =>
 				write!(f, "while {} do\n{}end", condition, block),
