@@ -4,7 +4,7 @@ use self::super::{
 };
 use std::{collections::HashMap, convert::TryInto};
 
-pub fn compile(block: &Block) -> Chunk {
+pub fn compile_block(block: &Block) -> Chunk {
 	let mut compiler = Generator::new();
 	compiler.compile(block);
 	compiler.finish()

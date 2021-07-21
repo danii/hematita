@@ -70,7 +70,7 @@ pub struct VirtualMachine {
 	string_meta: Option<Arc<Table>>,
 	boolean_meta: Option<Arc<Table>>,
 	function_meta: Option<Arc<Table>>,
-	global: Arc<Table>
+	pub global: Arc<Table>
 }
 
 impl VirtualMachine {

@@ -1,5 +1,5 @@
 [workspace]
 members = [
-	"lua_hematita",
-	"lua_hematita_cli"
+	"hematita_da_lua",
+	"hematita_da_lua_cli"
 ]

@@ -9,6 +9,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 
 [[package]]
+name = "hematita_da_lua"
+version = "0.1.0"
+dependencies = [
+ "if_chain",
+ "itertools",
+ "maplit",
+]
+
+[[package]]
+name = "hematita_da_lua_cli"
+version = "0.1.0"
+dependencies = [
+ "hematita_da_lua",
+ "maplit",
+ "pico-args",
+]
+
+[[package]]
 name = "if_chain"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -24,24 +42,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "lua_hematita"
-version = "0.1.0"
-dependencies = [
- "if_chain",
- "itertools",
- "maplit",
-]
-
-[[package]]
-name = "lua_hematita_cli"
-version = "0.1.0"
-dependencies = [
- "lua_hematita",
- "maplit",
-]
-
-[[package]]
 name = "maplit"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
+
+[[package]]
+name = "pico-args"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db8bcd96cb740d03149cbad5518db9fd87126a10ab519c011893b1754134c468"

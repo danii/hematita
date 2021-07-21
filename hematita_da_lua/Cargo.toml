@@ -1,5 +1,5 @@
 [package]
-name = "lua_hematita"
+name = "hematita_da_lua"
 version = "0.1.0"
 edition = "2018"
 authors = ["Daniel Conley <himself@danii.dev>"]

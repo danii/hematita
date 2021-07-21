@@ -1,9 +1,0 @@
-[package]
-name = "lua_hematita_cli"
-version = "0.1.0"
-edition = "2018"
-authors = ["Daniel Conley <himself@danii.dev>"]
-
-[dependencies]
-lua_hematita = {path = "../lua_hematita"}
-maplit = "1.0.2"

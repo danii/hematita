@@ -90,7 +90,7 @@ impl<I> TokenIterator<I>
 	}
 
 	/// Returns the next token, if any.
-	fn next(&mut self) -> Option<Token> {
+	pub fn next(&mut self) -> Option<Token> {
 		self.0.next()
 	}
 
@@ -132,7 +132,7 @@ impl<I> TokenIterator<I>
 }
 
 /// Parses a block of lua tokens.
-pub fn parse(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
+pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 		-> Result<Block> {
 	let mut statements = Vec::new();
 
@@ -563,7 +563,7 @@ pub fn parse_if(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 	expect!(iter.next(), Token::KeywordIf);
 	let condition = parse_expression(iter)?;
 	expect!(iter.next(), Token::KeywordThen);
-	let then = parse(iter)?;
+	let then = parse_block(iter)?;
 
 	let mut r#else = None;
 	let else_ifs = from_fn(|| match iter.next() {
@@ -571,11 +571,11 @@ pub fn parse_if(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 		Some(Token::KeywordElseIf) => {
 			let condition = iter_throw!(parse_expression(iter));
 			iter_expect!(iter.next(), Token::KeywordThen);
-			let then = iter_throw!(parse(iter));
+			let then = iter_throw!(parse_block(iter));
 			Some(Ok(ElseIf {condition, then}))
 		},
 		Some(Token::KeywordElse) => {
-			r#else = Some(iter_throw!(parse(iter)));
+			r#else = Some(iter_throw!(parse_block(iter)));
 			iter_expect!(iter.next(), Token::KeywordEnd);
 			None
 		},
@@ -615,7 +615,7 @@ pub fn parse_for(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 				token => return Err(Error(token))
 			};
 
-			let r#do = parse(iter)?;
+			let r#do = parse_block(iter)?;
 			expect!(iter.next(), Token::KeywordEnd);
 			Ok(Statement::NumericFor {variable, first, limit, step, r#do})
 		},
@@ -624,7 +624,7 @@ pub fn parse_for(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 		Some(Token::KeywordIn) => {
 			let iterator = parse_expression(iter)?;
 			expect!(iter.next(), Token::KeywordDo);
-			let r#do = parse(iter)?;
+			let r#do = parse_block(iter)?;
 			expect!(iter.next(), Token::KeywordEnd);
 			Ok(Statement::GenericFor {variable, iterator, r#do})
 		},
@@ -640,14 +640,14 @@ pub fn parse_while(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 		Some(Token::KeywordWhile) => {
 			let condition = parse_expression(iter)?;
 			expect!(iter.next(), Token::KeywordDo);
-			let block = parse(iter)?;
+			let block = parse_block(iter)?;
 			expect!(iter.next(), Token::KeywordEnd);
 			Statement::While {condition, block, run_first: false}
 		},
 
 		// until condition
 		Some(Token::KeywordRepeat) => {
-			let block = parse(iter)?;
+			let block = parse_block(iter)?;
 			expect!(iter.next(), Token::KeywordUntil);
 			let condition = parse_expression(iter)?;
 			Statement::While {condition, block, run_first: true}
@@ -688,7 +688,7 @@ pub fn parse_function(iter: &mut TokenIterator<impl Iterator<Item = Token>>,
 		Some(Token::CloseParen) => {iter.eat(); None},
 		_ => Some(Err(Error(iter.next())))
 	}).try_collect()?;
-	let body = parse(iter)?;
+	let body = parse_block(iter)?;
 	expect!(iter.next(), Token::KeywordEnd);
 
 	Ok((name, arguments, body))
