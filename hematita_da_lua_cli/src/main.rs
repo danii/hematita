@@ -1,8 +1,11 @@
 mod arguments;
 mod repl;
 
-use self::{arguments::{HELP, Arguments, Error as ArgumentError}, repl::repl};
-use std::{fs::File, io::{Error as IOError, Read}, process::exit};
+use self::{
+	arguments::{HELP, Arguments, ExecutionType, Error as ArgumentError},
+	repl::repl
+};
+use std::{convert::TryFrom, io::Error as IOError, process::exit};
 use hematita_da_lua::{
 	ast::{
 		lexer::Lexer,
@@ -25,15 +28,18 @@ Targeting Lua 5.4.3";
 
 fn main() {
 	match Arguments::from_env() {
-		Ok(Arguments::Help) => eprintln!("{}", HELP),
-		Ok(Arguments::Version) => eprintln!("{}", VERSION),
-		Ok(Arguments::Inline(code, interactive)) => run_code(&code, interactive),
-		Ok(Arguments::File(file, interactive)) => {
-			let mut file = handle_io(File::open(&file));
-			let mut code = String::new();
-			handle_io(file.read_to_string(&mut code));
-			run_code(&code, interactive)
-		},
+		Ok(Arguments::ShowHelp) => eprintln!("{}", HELP),
+		Ok(Arguments::ShowVersion) => eprintln!("{}", VERSION),
+		Ok(Arguments::Run {source, execution: ExecutionType::Run}) =>
+			run_code(&handle_io(String::try_from(source)), false),
+		Ok(Arguments::Run {source, execution: ExecutionType::RunInteractively}) =>
+			run_code(&handle_io(String::try_from(source)), false),
+		Ok(Arguments::Run {source, execution: ExecutionType::ShowByteCode}) =>
+			show_byte_code(&handle_io(String::try_from(source))),
+		Ok(Arguments::Run {source, execution: ExecutionType::ShowSyntaxTree}) =>
+			show_syntax_tree(&handle_io(String::try_from(source))),
+		Ok(Arguments::Run {source, execution: ExecutionType::ShowTokens}) =>
+			show_tokens(&handle_io(String::try_from(source))),
 		Err(ArgumentError::MissingArgument) => repl(init_vm()),
 		a => todo!("{:?}", a)
 	}
@@ -66,6 +72,40 @@ fn run_code(code: &str, interactive: bool) {
 			exit(2);
 		}
 	}
+}
+
+fn show_byte_code(code: &str) {
+	match compile(code) {
+		Ok(function) => {
+			println!("{}", function.chunk)
+		},
+		Err(error) => {
+			eprintln!("syntax error: {}", error);
+			exit(2);
+		}
+	}
+}
+
+fn show_syntax_tree(code: &str) {
+	let tokens = Lexer {source: code.chars().peekable()};
+	let mut tokens = TokenIterator(tokens.peekable());
+
+	match parse_block(&mut tokens) {
+		Ok(block) => {
+			println!("{}", block)
+		},
+		Err(error) => {
+			eprintln!("syntax error: {}", error);
+			exit(2);
+		}
+	}
+}
+
+fn show_tokens(code: &str) {
+	let tokens = Lexer {source: code.chars().peekable()};
+	let tokens: Vec<_> = tokens.collect();
+
+	println!("{:#?}", tokens)
 }
 
 fn compile(code: &str) -> Result<Function, ParserError> {

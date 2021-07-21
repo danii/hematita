@@ -134,7 +134,7 @@ impl<I> TokenIterator<I>
 	fn peek(&mut self) -> Option<Token> {
 		// God this borrow check bug is annoying.
 		match self.0.peek().cloned() {
-			Some(Token::Comment(_)) => self.eat_peek(),
+			Some(Token::Comment(_)) => {self.0.next(); self.peek()},
 			token => token
 		}
 	}
