@@ -129,6 +129,12 @@ pub fn r#type(arguments: Arc<Table>, _: Arc<Table>)
 pub fn standard_globals() -> Table {
 	Table::from_hashmap(hashmap! {
 		Value::new_string("print") =>
-			Value::NativeFunction(print)
+			Value::NativeFunction(print),
+		Value::new_string("type") =>
+			Value::NativeFunction(r#type),
+		Value::new_string("setmetatable") =>
+			Value::NativeFunction(setmetatable),
+		Value::new_string("getmetatable") =>
+			Value::NativeFunction(getmetatable)
 	})
 }

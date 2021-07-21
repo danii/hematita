@@ -403,6 +403,16 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 					(left, right, BinaryOperation::GreaterThanOrEqual) =>
 						binary_relational!(self, left, right, __le, >=, true),
 
+					// Other
+
+					// Concat
+					(NonNil(Value::String(left)), NonNil(Value::String(right)),
+							BinaryOperation::Concat) => {
+						let mut new = String::with_capacity(left.len() + right.len());
+						new.push_str(&left); new.push_str(&right);
+						NonNil(Value::String(new.into_boxed_str()))
+					},
+
 					// TODO: Better error handling...
 					_ => return Err("unknown binary operation error".to_owned())
 				}),

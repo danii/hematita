@@ -19,8 +19,8 @@ impl<T> Lexer<T>
 		self.source.next()
 	}
 
-	/// Returns the next character assuming, assuming that the character was
-	/// already peeked, and did infact, exist.
+	/// Returns the next character, assuming that the character was already
+	/// peeked, and did infact, exist.
 	fn peeked_next(&mut self) -> char {
 		self.next().unwrap()
 	}
@@ -94,9 +94,9 @@ impl<T> Lexer<T>
 					'n' => {self.eat(); string.push('\n')},
 					'r' => {self.eat(); string.push('\r')},
 					't' => {self.eat(); string.push('\t')},
-					'v' => {self.eat(); string.push('A')},
-					'\\' => {self.eat(); string.push('\x0B')},
-					'"' => {self.eat(); string.push('\"')},
+					'v' => {self.eat(); string.push('\x0B')},
+					'\\' => {self.eat(); string.push('\\')},
+					'"' => {self.eat(); string.push('"')},
 					'\'' => {self.eat(); string.push('\'')},
 					'[' => {self.eat(); string.push('[')},
 					']' => {self.eat(); string.push(']')},
@@ -107,6 +107,11 @@ impl<T> Lexer<T>
 				_ => string.push(self.peeked_next())
 			}
 		}
+	}
+
+	/// Parses a string. Assumes the first character was a [, and was consumed.
+	fn parse_bracketed_string(&mut self) -> Option<Token> {
+		self.parse_bracketed().map(Token::String)
 	}
 
 	/// Parses a number, or, potentially, the subtraction operator.
@@ -133,6 +138,70 @@ impl<T> Lexer<T>
 			Token::Integer(number.parse().unwrap())
 		})
 	}
+
+	/// Parses a comment. Assumes the first characters were --, and were consumed.
+	fn parse_comment(&mut self) -> Option<Token> {
+		match self.peek()? {
+			'[' => self.parse_bracketed().map(Token::Comment),
+			_ => {
+				let mut comment = String::new();
+				loop {
+					match self.peek()? {
+						'\n' => {self.eat(); break Some(Token::Comment(comment))},
+						_ => comment.push(self.peeked_next())
+					}
+				}
+			}
+		}
+	}
+
+	/// Parses some bracketed item. Assumes the first character was a [, and was
+	/// consumed.
+	fn parse_bracketed(&mut self) -> Option<String> {
+		let mut string = String::new();
+		let length = {
+			let mut length = 0usize;
+			loop {
+				match self.peek()? {
+					'=' => {self.eat(); length = length + 1},
+					'[' => {self.eat(); break length},
+					_ => return None
+				}
+			}
+		};
+
+		loop {
+			match self.peek()? {
+				']' => {
+					string.push(self.peeked_next());
+					let mut end_length = length;
+					if loop {
+						match self.peek()? {
+							'=' => {
+								string.push(self.peeked_next());
+								match end_length.checked_sub(1) {
+									Some(new) => end_length = new,
+									None => break false
+								}
+							},
+							']' => {
+								string.push(self.peeked_next());
+								if end_length == 0 {break true}
+							},
+							_ => {
+								string.push(self.peeked_next());
+								break false
+							}
+						}
+					} {
+						string.truncate(string.len() - length - 2);
+						break Some(string)
+					}
+				},
+				_ => string.push(self.peeked_next())
+			}
+		}
+	}
 }
 
 impl<T> Iterator for Lexer<T> where T: Iterator<Item = char> {
@@ -142,6 +211,20 @@ impl<T> Iterator for Lexer<T> where T: Iterator<Item = char> {
 		Some(match self.parse_whitespace()? {
 			// TODO: Error handling on complex cases.
 			// Complex
+
+			// Single character token Minus (-)
+			// OR Multiple character Comment (--[[]])
+			'-' => match {self.eat(); self.peek().unwrap()} {
+				'-' => {self.eat(); self.parse_comment().unwrap()},
+				_ => Token::Minus
+			},
+
+			// Single character token OpenBracket ([)
+			// OR Multiple character token String ([[]])
+			'[' => match {self.eat(); self.peek().unwrap()} {
+				'=' | '[' => self.parse_bracketed_string().unwrap(),
+				_ => Token::OpenBracket
+			},
 
 			// Single character token Other Assign (=)
 			// OR Double character token Relational Equal (==)
@@ -192,7 +275,7 @@ impl<T> Iterator for Lexer<T> where T: Iterator<Item = char> {
 
 			// Arithmetic
 			'+' => {self.eat(); Token::Add},
-			'-' => {self.eat(); Token::Minus},
+			// Minus is a complex token
 			'*' => {self.eat(); Token::Multiply},
 			// Divide and FloorDivide are complex tokens
 			'%' => {self.eat(); Token::Modulo},
@@ -220,7 +303,7 @@ impl<T> Iterator for Lexer<T> where T: Iterator<Item = char> {
 			')' => {self.eat(); Token::CloseParen},
 			'{' => {self.eat(); Token::OpenCurly},
 			'}' => {self.eat(); Token::CloseCurly},
-			'[' => {self.eat(); Token::OpenBracket},
+			// Sectioning OpenBracket is a complex token
 			']' => {self.eat(); Token::CloseBracket},
 
 			// Literals
@@ -232,8 +315,11 @@ impl<T> Iterator for Lexer<T> where T: Iterator<Item = char> {
 	}
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Token {
+	// Comment
+	Comment(String),
+
 	// Literals
 	Identifier(String),
 	Integer(i64),
@@ -310,6 +396,9 @@ pub enum Token {
 impl std::fmt::Display for Token {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
+			// Comment
+			Self::Comment(comment) => write!(f, "--[===[{}]===]", comment),
+
 			// Literals
 			Self::Identifier(identifier) => write!(f, "{}", identifier),
 			Self::Integer(integer) => write!(f, "{}", integer),

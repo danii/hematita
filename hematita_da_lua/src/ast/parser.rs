@@ -91,11 +91,16 @@ impl<I> TokenIterator<I>
 
 	/// Returns the next token, if any.
 	pub fn next(&mut self) -> Option<Token> {
-		self.0.next()
+		loop {
+			match self.0.next() {
+				Some(Token::Comment(_)) => (),
+				token => break token
+			}
+		}
 	}
 
 	/// Eats a token, then peeks the next one, if any.
-	fn eat_peek(&mut self) -> Option<&Token> {
+	fn eat_peek(&mut self) -> Option<Token> {
 		self.eat();
 		self.peek()
 	}
@@ -126,8 +131,12 @@ impl<I> TokenIterator<I>
 	}
 
 	/// Peeks the next token, if any.
-	fn peek(&mut self) -> Option<&Token> {
-		self.0.peek()
+	fn peek(&mut self) -> Option<Token> {
+		// God this borrow check bug is annoying.
+		match self.0.peek().cloned() {
+			Some(Token::Comment(_)) => self.eat_peek(),
+			token => token
+		}
 	}
 }
 
