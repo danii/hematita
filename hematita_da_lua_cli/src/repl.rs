@@ -35,7 +35,7 @@ pub fn repl(vm: VirtualMachine) {
 			Err(error) => eprintln!("syntax error: unexpected {}", error),
 			Ok(function) => match vm.execute(&function, Table::default().arc()) {
 				Ok(output) => match output.index(&Value::Integer(1)) {
-					NonNil(_) => {print(output, vm.global.clone()).unwrap();},
+					NonNil(_) => {print(output, &vm).unwrap();},
 					Nil => ()
 				},
 				Err(error) => eprintln!("runtime error: {}", error)

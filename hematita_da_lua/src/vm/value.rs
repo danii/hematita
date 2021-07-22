@@ -1,13 +1,16 @@
-pub use self::{super::Chunk, NillableValue::{Nil, NonNil}};
+pub use self::{super::{Chunk, VirtualMachine}, NillableValue::{Nil, NonNil}};
 use std::{
 	array::IntoIter as ArrayIntoIter,
 	borrow::Borrow,
 	collections::HashMap,
 	fmt::{Debug, Display, Formatter, Result as FMTResult},
 	hash::{Hash, Hasher},
-	ptr::eq,
+	ptr::{eq, hash},
 	sync::{Arc, Mutex}
 };
+
+pub type NativeFunction<'r> = &'r dyn Fn(Arc<Table>, &VirtualMachine)
+	-> Result<Arc<Table>, String>;
 
 /// Represents a lua value.
 // TODO: Add floats.
@@ -18,7 +21,7 @@ pub enum Value {
 	Boolean(bool),
 	Table(Arc<Table>),
 	Function(Arc<Function>),
-	NativeFunction(fn(Arc<Table>, Arc<Table>) -> Result<Arc<Table>, String>)
+	NativeFunction(NativeFunction<'static>)
 }
 
 impl Value {
@@ -108,7 +111,7 @@ impl Debug for Value {
 			Self::Boolean(boolean) => Debug::fmt(boolean, f),
 			Self::Table(table) => Debug::fmt(table, f),
 			Self::Function(function) => Debug::fmt(function, f),
-			Self::NativeFunction(function) => function.fmt(f)
+			Self::NativeFunction(function) => write!(f, "function: {:p}", function)
 		}
 	}
 }
@@ -125,7 +128,7 @@ impl PartialEq for Value {
 				Arc::as_ptr(a) == Arc::as_ptr(b),
 			(Self::Table(a), Self::Table(b)) =>
 				Arc::as_ptr(a) == Arc::as_ptr(b),
-			(Self::NativeFunction(a), Self::NativeFunction(b)) => a == b,
+			(Self::NativeFunction(a), Self::NativeFunction(b)) => eq(*a, *b),
 			_ => false
 		}
 	}
@@ -140,7 +143,7 @@ impl Hash for Value {
 			Self::Boolean(boolean) => boolean.hash(state),
 			Self::Function(arc) => Arc::as_ptr(arc).hash(state),
 			Self::Table(arc) => Arc::as_ptr(arc).hash(state),
-			Self::NativeFunction(func) => func.hash(state)
+			Self::NativeFunction(func) => hash(func, state)
 		}
 	}
 }

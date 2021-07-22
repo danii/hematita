@@ -1,4 +1,4 @@
-use self::super::vm::value::{IntoNillableValue, Table, Value};
+use self::super::vm::{value::{IntoNillableValue, Table, Value}, VirtualMachine};
 use itertools::Itertools;
 use maplit::hashmap;
 use std::{collections::HashMap, sync::Arc};
@@ -39,7 +39,7 @@ pub fn vector_to_table(vector: Vec<Option<Value>>) -> HashMap<Value, Value> {
 		.collect::<HashMap<_, _>>()
 }
 
-pub fn print(arguments: Arc<Table>, _: Arc<Table>)
+pub fn print(arguments: Arc<Table>, _: &VirtualMachine)
 		-> Result<Arc<Table>, String> {
 	let message = table_to_vector(&*arguments).into_iter()
 		.map(|argument| format!("{}", argument.nillable()))
@@ -80,7 +80,7 @@ pub fn pcall(arguments: Arc<Table>, global: Arc<Table>)
 	}
 }*/
 
-pub fn setmetatable(arguments: Arc<Table>, _: Arc<Table>)
+pub fn setmetatable(arguments: Arc<Table>, _: &VirtualMachine)
 		-> Result<Arc<Table>, String> {
 	let arguments = table_to_vector(&arguments);
 	let meta = match arguments.get(1) {
@@ -99,7 +99,7 @@ pub fn setmetatable(arguments: Arc<Table>, _: Arc<Table>)
 	Ok(Table::from_hashmap(vector_to_table(vec![])).arc())
 }
 
-pub fn getmetatable(arguments: Arc<Table>, _: Arc<Table>)
+pub fn getmetatable(arguments: Arc<Table>, _: &VirtualMachine)
 		-> Result<Arc<Table>, String> {
 	let arguments = table_to_vector(&arguments);
 	Ok(Table::from_hashmap(match arguments.get(0) {
@@ -118,7 +118,7 @@ pub fn getmetatable(arguments: Arc<Table>, _: Arc<Table>)
 	}).arc())
 }
 
-pub fn r#type(arguments: Arc<Table>, _: Arc<Table>)
+pub fn r#type(arguments: Arc<Table>, _: &VirtualMachine)
 		-> Result<Arc<Table>, String> {
 	let arguments = table_to_vector(&arguments);
 	let r#type = arguments.get(0).cloned().flatten().nillable().type_name();
@@ -129,12 +129,12 @@ pub fn r#type(arguments: Arc<Table>, _: Arc<Table>)
 pub fn standard_globals() -> Table {
 	Table::from_hashmap(hashmap! {
 		Value::new_string("print") =>
-			Value::NativeFunction(print),
+			Value::NativeFunction(&print),
 		Value::new_string("type") =>
-			Value::NativeFunction(r#type),
+			Value::NativeFunction(&r#type),
 		Value::new_string("setmetatable") =>
-			Value::NativeFunction(setmetatable),
+			Value::NativeFunction(&setmetatable),
 		Value::new_string("getmetatable") =>
-			Value::NativeFunction(getmetatable)
+			Value::NativeFunction(&getmetatable)
 	})
 }

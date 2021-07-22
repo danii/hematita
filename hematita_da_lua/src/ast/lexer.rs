@@ -15,7 +15,7 @@ impl<T> Lexer<T>
 
 	/// Returns the next character, if any.
 	/// Shortcut for accessing source with the same method.
-	fn next(&mut self) -> Option<char> {
+	pub(in super) fn next(&mut self) -> Option<char> {
 		self.source.next()
 	}
 
@@ -27,13 +27,13 @@ impl<T> Lexer<T>
 
 	/// Peeks the next character, if any.
 	/// Shortcut for accessing source with the same method.
-	fn peek(&mut self) -> Option<char> {
+	pub(in super) fn peek(&mut self) -> Option<char> {
 		self.source.peek().map(Clone::clone)
 	}
 
 	/// Parses through whitespace and comments, discarding it all, and returns
 	/// the last peeked non whitespace character.
-	fn parse_whitespace(&mut self) -> Option<char> {
+	pub(in super) fn parse_whitespace(&mut self) -> Option<char> {
 		loop {
 			match self.peek()? {
 				' ' | '\n' | '\t' => self.eat(),

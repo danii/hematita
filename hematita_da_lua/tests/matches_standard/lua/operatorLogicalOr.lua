@@ -1,0 +1,6 @@
+print(nil or 4)
+print(4 or 5)
+print(false or "value")
+print(true or "other")
+print("i wonder what this string should say..." or "what this one should say")
+print(({2} or {1})[1])

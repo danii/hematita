@@ -192,7 +192,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 			NonNil(Value::Function(function)) =>
 				self.virtual_machine.execute(&*function, arguments),
 			NonNil(Value::NativeFunction(function)) =>
-				function(arguments, self.virtual_machine.global.clone()),
+				function(arguments, self.virtual_machine),
 			// NOTE: While this can cause unbounded recursion, this is actually what
 			// happens in the main implementation.
 			function if self.meta_method(&function, "__call").is_non_nil() => {
@@ -358,17 +358,6 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 
 					// Equal
 					(Nil, Nil, BinaryOperation::Equal) => NonNil(Value::Boolean(true)),
-					(NonNil(Value::Integer(left)), NonNil(Value::Integer(right)),
-						BinaryOperation::Equal) => NonNil(Value::Boolean(left == right)),
-					(NonNil(Value::Boolean(left)), NonNil(Value::Boolean(right)),
-						BinaryOperation::Equal) => NonNil(Value::Boolean(left == right)),
-					(NonNil(Value::String(left)), NonNil(Value::String(right)),
-						BinaryOperation::Equal) => NonNil(Value::Boolean(left == right)),
-					(NonNil(Value::Function(left)), NonNil(Value::Function(right)),
-						BinaryOperation::Equal) => NonNil(Value::Boolean(left == right)),
-					(NonNil(Value::NativeFunction(left)),
-						NonNil(Value::NativeFunction(right)), BinaryOperation::Equal) =>
-							NonNil(Value::Boolean(left == right)),
 					(left @ NonNil(Value::Table(_)), right @ NonNil(Value::Table(_)),
 							BinaryOperation::Equal) if self.meta_method(&left, "__eq")
 								.is_non_nil() => {
@@ -383,9 +372,8 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 						let result = self.call(meta, Table::array([&left, &right]).arc())?;
 						result.index(&Value::Integer(1))
 					},
-					(NonNil(Value::Table(left)), NonNil(Value::Table(right)),
-						BinaryOperation::Equal) => NonNil(Value::Boolean(left == right)),
-					(_, _, BinaryOperation::Equal) => NonNil(Value::Boolean(false)),
+					(left, right, BinaryOperation::Equal) =>
+						NonNil(Value::Boolean(left == right)),
 
 					// Less Than
 					(left, right, BinaryOperation::LessThan) =>

@@ -22,7 +22,7 @@
 //! Executing Lua source text is fairly straight forward, and only requires
 //! stringing together each component.
 //! ```rust
-//! use lua_hematita::{ast::{lexer, parser}, compiler, vm, lua_lib};
+//! use hematita_da_lua::{ast::{lexer, parser}, compiler, vm, lua_lib};
 //!
 //! // Ready our Lua source code.
 //! let source = "print(\"Hello, World!\")";
@@ -30,9 +30,9 @@
 //! // code.
 //! let lexer = lexer::Lexer {source: source.chars().peekable()}.peekable();
 //! // Parse from the lexer a block of statements.
-//! let parsed = parser::parse(&mut parser::TokenIterator(lexer)).unwrap();
+//! let parsed = parser::parse_block(&mut parser::TokenIterator(lexer)).unwrap();
 //! // Compile bytecode from the block of statements.
-//! let compiled = compiler::compile(&parsed);
+//! let compiled = compiler::compile_block(&parsed);
 //!
 //! // Running the bytecode is slightly more involved, as we have to prepare a
 //! // global scope for the virtual machine, and arguments for our code. It's
