@@ -10,11 +10,11 @@ pub fn compile_block(block: &Block) -> Chunk {
 	compiler.finish()
 }
 
-pub fn compile_function(block: &Block, arguments: &Vec<String>,
+pub fn compile_function(block: &Block, arguments: &[String],
 		up_values: HashMap<String, (usize, bool)>) -> Chunk {
 	let mut compiler = Generator {up_values, ..Generator::new()};
 	compiler.compile_function_header(arguments);
-	compiler.compile(&block);
+	compiler.compile(block);
 	compiler.finish()
 }
 
@@ -92,7 +92,7 @@ impl Generator {
 				self.constants.len() - 1
 			}) as u16;
 		self.opcode(OpCode::LoadConst {constant, register});
-		return register
+		register
 	}
 
 	fn finish(self) -> Chunk {
@@ -210,7 +210,7 @@ impl Generator {
 					//self.opcode(OpCode::IndexWrite {indexee: arguments, index, value})
 
 					let destination = self.register();
-					let index = self.compile_known(1 as i64);
+					let index = self.compile_known(1);
 					self.opcode(OpCode::Call {function, arguments, destination});
 					self.opcode(OpCode::IndexRead {indexee: destination,
 						index, destination});
@@ -384,10 +384,11 @@ impl Generator {
 				// Expressions
 
 				Statement::Call {function, arguments} =>
-					{self.compile_call(function, &arguments);},
+					{self.compile_call(function, arguments);},
 
 				Statement::Function {name, arguments, body, local} => {
 					// We need to realize all values...
+					#[allow(clippy::needless_collect)] // Needed by borrow checker.
 					let evaluated = self.evaluated_variables.iter()
 						.map(|(name, value)| (name.clone(), value.clone()))
 						.collect::<Vec<_>>();
@@ -419,7 +420,7 @@ impl Generator {
 				}
 			}
 
-			current_statement = current_statement + 1;
+			current_statement += 1;
 		}
 	}
 
@@ -478,7 +479,7 @@ impl Generator {
 					let key = self.compile_expression(key).register(self);
 					let value = self.compile_expression(value).register(self);
 
-					self.opcode(OpCode::IndexWrite {index: key, value: value, indexee: register});
+					self.opcode(OpCode::IndexWrite {index: key, value, indexee: register});
 				});
 				array.iter().enumerate().for_each(|(index, value)| {
 					let value = self.compile_expression(value).register(self);
@@ -491,6 +492,7 @@ impl Generator {
 
 			Expression::Function {arguments, body} => {
 				// We need to realize all values...
+				#[allow(clippy::needless_collect)] // Needed by borrow checker.
 				let evaluated = self.evaluated_variables.iter()
 					.map(|(name, value)| (name.clone(), value.clone()))
 					.collect::<Vec<_>>();
@@ -600,8 +602,8 @@ impl Generator {
 		}
 	}
 
-	fn compile_call(&mut self, function: &Expression,
-			arguments: &Vec<Expression>) -> usize {
+	fn compile_call(&mut self, function: &Expression, arguments: &[Expression])
+			-> usize {
 		let function = self.compile_expression(function);
 
 		let arguments_register = self.register();
@@ -625,7 +627,7 @@ impl Generator {
 		destination
 	}
 
-	fn compile_function_header(&mut self, arguments: &Vec<String>) {
+	fn compile_function_header(&mut self, arguments: &[String]) {
 		let indexee = 0; // Function arguments...
 		arguments.iter().enumerate().for_each(|(index, argument)| {
 			let index = self.compile_known(index as i64 + 1);

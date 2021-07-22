@@ -56,7 +56,7 @@ fn handle_io<T>(result: Result<T, IOError>) -> T {
 }
 
 fn run_code(code: &str, interactive: bool) {
-	match compile(&code) {
+	match compile(code) {
 		Ok(function) => {
 			let vm = init_vm();
 			match vm.execute(&function, Table::default().arc()) {

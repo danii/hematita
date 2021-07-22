@@ -87,11 +87,11 @@ impl VirtualMachine {
 	/// Executes a function.
 	pub fn execute(&self, function: &Function, arguments: Arc<Table>)
 			-> Result<Arc<Table>, String> {
-		StackFrame {
-			virtual_machine: &self,
-			function,
-			registers: vec![Default::default(); function.chunk.registers].into_boxed_slice()
-		}.execute(arguments)
+		let virtual_machine = self;
+		let registers = vec![Default::default(); function.chunk.registers]
+			.into_boxed_slice();
+
+		StackFrame {virtual_machine, function, registers}.execute(arguments)
 	}
 }
 
@@ -549,7 +549,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 				OpCode::NoOp => ()
 			}
 
-			current_opcode = current_opcode + 1;
+			current_opcode += 1;
 		}
 	}
 }
@@ -882,16 +882,16 @@ impl Chunk {
 
 impl Display for Chunk {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
-		write!(f, "registers: {}\nconstants:\n", self.registers)?;
+		writeln!(f, "registers: {}\nconstants:", self.registers)?;
 		self.constants.iter().enumerate()
 			.try_for_each(|(index, constant)| {
-				if index != 0 {write!(f, "\n")?}
+				if index != 0 {writeln!(f)?}
 				write!(f, "\t{}: ", index)?; constant.fmt(f)
 			})?;
-		write!(f, "\n")?;
+		writeln!(f)?;
 		self.opcodes.iter().enumerate()
 			.try_for_each(|(index, opcode)| {
-				if index != 0 {write!(f, "\n")?}
+				if index != 0 {writeln!(f)?}
 				write!(f, "{}: ", index)?; opcode.fmt(f)
 			})
 	}

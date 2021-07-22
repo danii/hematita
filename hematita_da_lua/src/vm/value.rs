@@ -183,7 +183,8 @@ impl PartialEq for Value {
 				Arc::as_ptr(a) == Arc::as_ptr(b),
 			(Self::Table(a), Self::Table(b)) =>
 				Arc::as_ptr(a) == Arc::as_ptr(b),
-			(Self::NativeFunction(a), Self::NativeFunction(b)) => eq(*a, *b),
+			(Self::NativeFunction(a), Self::NativeFunction(b)) =>
+				eq(*a as *const _ as *const u8, *b as *const _ as *const u8),
 			_ => false
 		}
 	}
@@ -476,6 +477,11 @@ impl Table {
 		self.data.lock().unwrap().iter()
 			.filter_map(|(key, _)| key.integer())
 			.fold(0, |result, index| result.max(index))
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.data.lock().unwrap().iter()
+			.any(|(key, _)| key.integer().is_some())
 	}
 
 	pub fn index(&self, index: &Value) -> NillableValue<Value> {

@@ -46,12 +46,8 @@ impl<T> Lexer<T>
 	fn parse_identifier(&mut self) -> Option<Token> {
 		let mut identifier = String::new();
 
-		loop {
-			match self.peek() {
-				Some('a'..='z' | 'A'..='Z') => identifier.push(self.peeked_next()),
-				_ => break
-			}
-		}
+		while let Some('a'..='z' | 'A'..='Z') = self.peek()
+			{identifier.push(self.peeked_next())}
 
 		Some(match &identifier as &str {
 			"and" => Token::KeywordAnd,
@@ -121,7 +117,7 @@ impl<T> Lexer<T>
 		loop {
 			match self.peek() {
 				// TODO: - is impossible now.
-				Some('-') => if number.len() == 0 {
+				Some('-') => if number.is_empty() {
 					number.push(self.peeked_next())
 				} else {
 					todo!()
@@ -163,7 +159,7 @@ impl<T> Lexer<T>
 			let mut length = 0usize;
 			loop {
 				match self.peek()? {
-					'=' => {self.eat(); length = length + 1},
+					'=' => {self.eat(); length += 1},
 					'[' => {self.eat(); break length},
 					_ => return None
 				}

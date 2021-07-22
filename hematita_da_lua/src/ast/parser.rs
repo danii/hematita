@@ -90,6 +90,7 @@ impl<I> TokenIterator<I>
 	}
 
 	/// Returns the next token, if any.
+	#[allow(clippy::should_implement_trait)] // This will eventually be privated.
 	pub fn next(&mut self) -> Option<Token> {
 		loop {
 			match self.0.next() {
@@ -708,7 +709,7 @@ pub struct Block(pub Vec<Statement>);
 
 impl Display for Block {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
-		self.0.iter().try_for_each(|stmt| write!(f, "{}\n", stmt))
+		self.0.iter().try_for_each(|stmt| writeln!(f, "{}", stmt))
 	}
 }
 
@@ -841,9 +842,9 @@ impl Display for Statement {
 			
 			// Assignment
 
-			Self::Assign {actor, value, local} => if *local
-				{write!(f, "local {} = {}", actor, value)} else
-				{write!(f, "{} = {}", actor, value)},
+			Self::Assign {actor, value, local} =>
+				if *local {write!(f, "local {} = {}", actor, value)}
+				else {write!(f, "{} = {}", actor, value)},
 
 			// Expressions
 
