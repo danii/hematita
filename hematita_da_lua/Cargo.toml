@@ -10,4 +10,4 @@ if_chain = "1.0.1"
 maplit = "1.0.2"
 
 [dev-dependencies]
-diff = {path = "../../diff"}
+diff = "0.1.12"
