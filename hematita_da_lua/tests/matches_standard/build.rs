@@ -116,7 +116,8 @@ fn snake_case(camel_case: &str) -> String {
 }
 
 pub fn build(working: &Path) {
-	
+	println!("cargo:rerun-if-changed={}", working.join("lua").to_string_lossy());
+
 	let file = read_dir(working.join("lua")).unwrap()
 		.map(|file| {
 			let file = file?;
@@ -140,5 +141,4 @@ pub fn build(working: &Path) {
 	let file = format!("{}{}", HEADER, file);
 	File::create(working.join("main.rs")).unwrap()
 		.write_all(file.as_bytes()).unwrap();
-	
 }

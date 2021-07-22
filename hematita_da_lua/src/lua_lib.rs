@@ -1,6 +1,11 @@
-use self::super::vm::{value::{IntoNillableValue, Table, Value}, VirtualMachine};
+use self::super::{
+	vm::{
+		value::{IntoNillableValue, NillableValue::NonNil, Table, Value},
+		VirtualMachine
+	},
+	lua_table
+};
 use itertools::Itertools;
-use maplit::hashmap;
 use std::{collections::HashMap, sync::Arc};
 
 pub fn table_to_vector(table: &Table) -> Vec<Option<Value>> {
@@ -45,40 +50,34 @@ pub fn print(arguments: Arc<Table>, _: &VirtualMachine)
 		.map(|argument| format!("{}", argument.nillable()))
 		.join("\t");
 	println!("{}", message);
-	Ok(Table::from_hashmap(vector_to_table(Vec::new())).arc())
+	Ok(lua_table! {}.arc())
 }
 
-/*
-pub fn pcall(arguments: Arc<Table>, global: Arc<Table>)
+pub fn pcall(arguments: Arc<Table>, vm: &VirtualMachine)
 		-> Result<Arc<Table>, String> {
-	let mut arguments = table_to_vector(&*arguments);
-	match arguments.remove(0).nillable() {
-		NonNil(Value::Function(function)) => {
-			let arguments = vector_to_table(arguments);
-			let result = match execute(&*function, arguments, global.clone()) {
-				Ok(result) => vec![
-					Some(Value::Boolean(true)),
-					Some(Value::Table(result))
-				],
-				Err(err) => vec![
-					Some(Value::Boolean(false)),
-					Some(Value::String(err.into_boxed_str()))
-				]
-			};
-
-			Ok(Table::from_hashmap(vector_to_table(result)).arc())
+	Ok(match arguments.array_remove(1) {
+		NonNil(Value::Function(function)) =>
+				match vm.execute(&*function, arguments) {
+			Ok(result) => {result.array_insert(1, true.into()); result},
+			Err(error) => Table::array([&false.into(), &error.into()]).arc()
 		},
-		value => {
-			let result = format!("attempt to call a {} value", value.type_name());
-			let result = vec![
-				Some(Value::Boolean(false)),
-				Some(Value::String(result.into_boxed_str()))
-			];
+		NonNil(Value::NativeFunction(function)) => match function(arguments, vm) {
+			Ok(result) => {result.array_insert(1, true.into()); result},
+			Err(error) => Table::array([&false.into(), &error.into()]).arc()
+		},
+		value => Table::array([
+			&false.into(),
+			&format!("attempt to call a {} value", value.type_name()).into()
+		]).arc()
+	})
+}
 
-			Ok(Table::from_hashmap(vector_to_table(result)).arc())
-		}
-	}
-}*/
+pub fn error(arguments: Arc<Table>, _: &VirtualMachine)
+		-> Result<Arc<Table>, String> {
+	Err(arguments.index(&Value::Integer(1)).option()
+		.map(|value| value.string().map(str::to_string)).flatten()
+		.unwrap_or_else(|| "(non string errors are unsupported)".to_owned()))
+}
 
 pub fn setmetatable(arguments: Arc<Table>, _: &VirtualMachine)
 		-> Result<Arc<Table>, String> {
@@ -127,14 +126,12 @@ pub fn r#type(arguments: Arc<Table>, _: &VirtualMachine)
 }
 
 pub fn standard_globals() -> Table {
-	Table::from_hashmap(hashmap! {
-		Value::new_string("print") =>
-			Value::NativeFunction(&print),
-		Value::new_string("type") =>
-			Value::NativeFunction(&r#type),
-		Value::new_string("setmetatable") =>
-			Value::NativeFunction(&setmetatable),
-		Value::new_string("getmetatable") =>
-			Value::NativeFunction(&getmetatable)
-	})
+	lua_table! {
+		print = Value::NativeFunction(&print),
+		type = Value::NativeFunction(&r#type),
+		setmetatable = Value::NativeFunction(&setmetatable),
+		getmetatable = Value::NativeFunction(&getmetatable),
+		pcall = Value::NativeFunction(&pcall),
+		error = Value::NativeFunction(&error)
+	}
 }
