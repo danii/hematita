@@ -395,10 +395,28 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 
 					// Concat
 					(NonNil(Value::String(left)), NonNil(Value::String(right)),
-							BinaryOperation::Concat) => {
-						let mut new = String::with_capacity(left.len() + right.len());
-						new.push_str(&left); new.push_str(&right);
-						NonNil(Value::String(new.into_boxed_str()))
+						BinaryOperation::Concat) => NonNil(Value::String(
+							format!("{}{}", left, right).into_boxed_str())),
+					(NonNil(Value::String(left)), NonNil(Value::Integer(right)),
+						BinaryOperation::Concat) => NonNil(Value::String(
+							format!("{}{}", left, right).into_boxed_str())),
+					(NonNil(Value::Integer(left)), NonNil(Value::String(right)),
+						BinaryOperation::Concat) => NonNil(Value::String(
+							format!("{}{}", left, right).into_boxed_str())),
+					(NonNil(Value::Integer(left)), NonNil(Value::Integer(right)),
+						BinaryOperation::Concat) => NonNil(Value::String(
+							format!("{}{}", left, right).into_boxed_str())),
+					(left, right, BinaryOperation::Concat)
+							if self.meta_method(&left, "__concat").is_non_nil() => {
+						let meta = self.meta_method(&left, "__concat");
+						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						result.index(&Value::Integer(1))
+					},
+					(left, right, BinaryOperation::Concat)
+							if self.meta_method(&right, "__concat").is_non_nil() => {
+						let meta = self.meta_method(&right, "__concat");
+						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						result.index(&Value::Integer(1))
 					},
 
 					// TODO: Better error handling...
