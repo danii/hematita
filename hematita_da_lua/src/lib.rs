@@ -1,4 +1,19 @@
-#![forbid(unsafe_code)]
+#![forbid(
+	// Rationale: A Lua interpeter must be reliable, and should not be vulnerable
+	// to sandbox escape vulnerabilities.
+	unsafe_code
+)]
+#![warn(
+	// Rationale: Panics should be avoided in favor of returning a Result, and
+	// situations where panics are intentional should be well documented
+	// (requiring an allow attribute to signal complete documentation).
+	clippy::unwrap_used,
+	clippy::panic,
+
+	// Rationale: These should not be in production code.
+	clippy::todo,
+	clippy::unimplemented
+)]
 //! Hematita Da Lua is an interpreter for the scripting language Lua, written
 //! entirely in 100% safe Rust. Hematita is the portugese word for hematite, a
 //! type of iron oxide, or rust, and lua is the portugese word for moon. 'Lua
