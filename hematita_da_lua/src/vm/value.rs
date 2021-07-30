@@ -443,7 +443,7 @@ impl Table {
 		let len = self.len() as usize;
 		let mut data = self.data.lock().unwrap();
 
-		(index..=len.max(1))
+		(index..=(len.max(1) + 1))
 			.for_each(|index| match take(&mut value) {
 				NonNil(new) =>
 					value = data.insert(Value::Integer(index as i64), new).nillable(),

@@ -2,7 +2,8 @@ use self::super::{
 	ast::parser::{BinaryOperator, Block, Expression, KeyValue, Statement},
 	vm::{constant::{Constant, KnownValue}, Chunk, BinaryOperation, OpCode, UnaryOperation}
 };
-use std::{collections::HashMap, convert::TryInto};
+use std::{collections::HashMap, convert::TryInto, iter::once};
+use if_chain::if_chain;
 
 pub fn compile_block(block: &Block) -> Chunk {
 	let mut compiler = Generator::new();
@@ -18,17 +19,20 @@ pub fn compile_function(block: &Block, arguments: &[String],
 	compiler.finish()
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum CompileResult {
 	Evaluated(KnownValue),
-	Register(usize)
+	Register(usize, bool)
 }
 
 impl CompileResult {
 	fn register(self, compiler: &mut Generator) -> usize {
 		match self {
 			Self::Evaluated(known) => compiler.compile_known(known),
-			Self::Register(register) => register
+			Self::Register(register, tuple) => {
+				if tuple {compiler.unwrap_tuple(register)}
+				register
+			}
 		}
 	}
 }
@@ -120,6 +124,11 @@ impl Generator {
 		}
 	}
 
+	fn unwrap_tuple(&mut self, tuple: usize) {
+		let index = self.compile_known(1);
+		self.opcode(OpCode::IndexRead {index, indexee: tuple, destination: tuple});
+	}
+
 	fn compile(&mut self, block: &Block) {
 		let Block(block) = block;
 		let mut current_statement = 0;
@@ -146,7 +155,7 @@ impl Generator {
 						}
 					},
 					// We don't know what condition is.
-					CompileResult::Register(variable) => match r#else {
+					CompileResult::Register(variable, tuple) => match r#else {
 						Some(r#else) => {
 							// Jump If local To 'then
 							// Block r#else
@@ -154,6 +163,8 @@ impl Generator {
 							// 'then
 							// Block then
 							// 'done
+
+							if tuple {self.unwrap_tuple(variable)}
 
 							let jump_then = self.opcodes.len();
 							self.opcode(OpCode::NoOp);
@@ -300,39 +311,89 @@ impl Generator {
 
 				// Assign
 
-				Statement::Assign {actor, value, local} => match local {
-					true => match actor {
-						Expression::Identifier(identifier) =>
-								match self.compile_expression(value) {
-							CompileResult::Evaluated(value) => {
-								// We don't have to assign this variable immediately, because
-								// it's known.
-								self.evaluated_variables.insert(identifier.clone(), value);
-							},
-							CompileResult::Register(actor) => {
-								// identifier already has it's own register. We don't want to
-								// be able to change it's data if we write to the new variable,
-								// so we make a new register, and reassign.
-								self.evaluated_variables.remove(identifier);
-								let destination = self.register();
-								self.opcode(OpCode::ReAssign {actor, destination});
-								self.variables_to_registers.insert(identifier.clone(), destination);
+				Statement::Assign {actors, values, local} => {
+					// TODO: This is **j a n k**-tastic
+
+					enum ValuesType<M>
+							where M: Iterator<Item = CompileResult> {
+						MultipleValues(M),
+						FunctionCall(usize, i64)
+					}
+
+					impl<M> ValuesType<M>
+							where M: Iterator<Item = CompileResult> {
+						#[inline]
+						fn next(&mut self, soup: &mut Generator, temporary: usize)
+								-> CompileResult {
+							match self {
+								Self::MultipleValues(iter) => match iter.next() {
+									Some(value) => value,
+									None => CompileResult::Register(temporary, false)
+								},
+								&mut Self::FunctionCall(indexee, ref mut index) => {
+									*index += 1;
+
+									let index = soup.compile_known(*index);
+									soup.opcode(OpCode::IndexRead {index, indexee,
+										destination: temporary});
+
+									CompileResult::Register(temporary, false)
+								}
 							}
+						}
+					}
+
+					let temporary = self.register();
+					let mut actors = once(&actors.0).chain(actors.1.iter());
+					let mut values = {
+						let values = values.iter()
+							.map(|value| self.compile_expression(value))
+							.collect::<Vec<_>>();
+						if_chain! {
+							if values.len() == 1;
+							if let CompileResult::Register(register, true) = values[0];
+							then {
+								ValuesType::FunctionCall(register, 0)
+							} else {
+								ValuesType::MultipleValues(values.into_iter())
+							}
+						}
+					};
+
+					let mut clea = Vec::new();
+
+					while let Some(actor) = actors.next() {match (
+							*local, actor, values.next(self, temporary)) {
+						(true, Expression::Identifier(name),
+								CompileResult::Evaluated(value)) => {
+							// We don't have to assign this variable immediately, because
+							// it's known.
+							clea.push((name.clone(), CompileResult::Evaluated(value)));
 						},
-						_ => panic!() // TODO: Can't happen? Shouldn't happen.
-					},
-					false => match actor {
-						Expression::Identifier(identifier) => match (
-							self.compile_expression(value),
+						(true, Expression::Identifier(name),
+								CompileResult::Register(actor, tuple)) => {
+							// identifier already has it's own register. We don't want to
+							// be able to change it's data if we write to the new
+							// variable, so we make a new register, and reassign.
+							if tuple {self.unwrap_tuple(actor)}
+							let destination = self.register();
+							self.opcode(OpCode::ReAssign {actor, destination});
+
+							clea.push((name.clone(), CompileResult::Register(destination, false)));
+						},
+						(true, _, _) => panic!(),
+						(false, Expression::Identifier(identifier), value) => match (
+							value,
 							self.evaluated_variables.get(identifier),
 							self.variables_to_registers.get(identifier),
 							self.up_values.get(identifier)
 						) {
-							(CompileResult::Evaluated(value), Some(_), _, _) =>
-								{self.evaluated_variables.insert(identifier.clone(), value);},
-							(CompileResult::Register(register), Some(_), _, _) => {
-								self.evaluated_variables.remove(identifier);
-								self.variables_to_registers.insert(identifier.clone(), register);
+							(CompileResult::Evaluated(value), Some(_), _, _) => {
+								clea.push((identifier.clone(), CompileResult::Evaluated(value)));
+							},
+							(CompileResult::Register(register, tuple), Some(_), _, _) => {
+								clea.push((identifier.clone(), CompileResult::Register(register, false)));
+								if tuple {self.unwrap_tuple(register)}
 							},
 							(CompileResult::Evaluated(value), None, Some(&register), _) => {
 								// TODO: We could probably add destination to compile_known?
@@ -340,8 +401,9 @@ impl Generator {
 								self.opcode(OpCode::ReAssign {actor: old, destination: register});
 								self.registers[register] = Some(value);
 							},
-							(CompileResult::Register(old), None, Some(&new), _) => {
+							(CompileResult::Register(old, tuple), None, Some(&new), _) => {
 								// TODO: This is what destination in compile_expression was for.
+								if tuple {self.unwrap_tuple(old)}
 								self.opcode(OpCode::ReAssign {actor: old, destination: new});
 							},
 							(CompileResult::Evaluated(value),
@@ -349,36 +411,38 @@ impl Generator {
 								let register = self.compile_known(value);
 								self.opcode(OpCode::SaveUpValue {register, up_value: self.up_value_id(up_value)});
 							},
-							(CompileResult::Register(register),
-									None, None, Some(&up_value)) =>
-								self.opcode(OpCode::SaveUpValue {register, up_value: self.up_value_id(up_value)}),
+							(CompileResult::Register(register, tuple),
+									None, None, Some(&up_value)) => {
+								if tuple {self.unwrap_tuple(register)}
+								self.opcode(OpCode::SaveUpValue {register, up_value: self.up_value_id(up_value)})
+							},
 							(CompileResult::Evaluated(value), None, None, None) => {
 								let global = Box::leak(identifier.clone().into_boxed_str());
 								let register = self.compile_known(value);
 								self.opcode(OpCode::SaveGlobal {register, global});
 							},
-							(CompileResult::Register(register), None, None, None) => {
+							(CompileResult::Register(register, tuple), None, None, None) => {
+								if tuple {self.unwrap_tuple(register)}
+
 								let global = Box::leak(identifier.clone().into_boxed_str());
 								self.opcode(OpCode::SaveGlobal {register, global});
 							}
 						},
-						Expression::Index {indexee, index} =>
-								match self.compile_expression(value) {
-							CompileResult::Evaluated(value) => {
-								let indexee = self.compile_expression(indexee).register(self);
-								let index = self.compile_expression(index).register(self);
-								let register = self.compile_known(value);
-								self.opcode(OpCode::IndexWrite {indexee, index, value: register});
-							},
-							CompileResult::Register(value) => {
-								let indexee = self.compile_expression(indexee).register(self);
-								let index = self.compile_expression(index).register(self);
+						(false, _, _) => panic!()
+					}}
 
-								self.opcode(OpCode::IndexWrite {indexee, index, value});
+					clea.into_iter()
+						.for_each(|(name, value)| match value {
+							CompileResult::Register(value, _) => {
+								self.evaluated_variables.remove(&name);
+								self.variables_to_registers.insert(name, value);
+							},
+							CompileResult::Evaluated(value) => {
+								// TODO: Next line may not be necessary?
+								self.variables_to_registers.remove(&name);
+								self.evaluated_variables.insert(name, value);
 							}
-						},
-						_ => panic!() // TODO: Can't happen? Shouldn't happen.
-					}
+						});
 				},
 
 				// Expressions
@@ -435,20 +499,20 @@ impl Generator {
 				// Otherwise, check the local scope.
 				None => match self.variables_to_registers.get(identifier) {
 					// If it's in local scope, return it's register.
-					Some(&register) => CompileResult::Register(register),
+					Some(&register) => CompileResult::Register(register, false),
 					// Otherwise, check up values.
 					None => match self.up_values.get(identifier) {
 						Some(&up_value) => {
 							let register = self.register();
 							self.opcode(OpCode::LoadUpValue {up_value: self.up_value_id(up_value), register});
-							CompileResult::Register(register)
+							CompileResult::Register(register, false)
 						},
 						// Otherwise, load from global scope.
 						None => {
 							let register = self.register();
 							self.opcode(OpCode::LoadGlobal {global: Box::leak(
 								identifier.clone().into_boxed_str()), register});
-							CompileResult::Register(register)
+							CompileResult::Register(register, false)
 						}
 					}
 				}
@@ -487,7 +551,7 @@ impl Generator {
 					self.opcode(OpCode::IndexWrite {index: temporary, value, indexee: register});
 				});
 
-				CompileResult::Register(register)
+				CompileResult::Register(register, false)
 			},
 
 			Expression::Function {arguments, body} => {
@@ -513,20 +577,20 @@ impl Generator {
 				let destination = self.register();
 
 				self.opcode(OpCode::LoadConst {constant, register: destination});
-				CompileResult::Register(destination)
+				CompileResult::Register(destination, false)
 			},
 
 			// Operators
 
 			Expression::Call {function, arguments} =>
-				CompileResult::Register(self.compile_call(function, arguments)),
+				CompileResult::Register(self.compile_call(function, arguments), true),
 
 			Expression::Index {indexee, index} => {
 				let destination = self.register();
 				let indexee = self.compile_expression(indexee).register(self);
 				let index = self.compile_expression(index).register(self);
 				self.opcode(OpCode::IndexRead {indexee, index, destination});
-				CompileResult::Register(destination)
+				CompileResult::Register(destination, false)
 			},
 
 			Expression::BinaryOperation {left, right,
@@ -535,12 +599,14 @@ impl Generator {
 				CompileResult::Evaluated(left) =>
 					if !left.coerce_to_bool() {CompileResult::Evaluated(left)}
 					else {self.compile_expression(right)},
-				CompileResult::Register(left) => {
+				CompileResult::Register(left, tuple) => {
 					// unop not {left} {boolean}
 					// cjmp {done} {boolean}
 					// <right compiled to {right}>
 					// reas {right} {left}
 					// <location of done>
+
+					if tuple {self.unwrap_tuple(left)}
 
 					let boolean = self.register();
 					self.opcode(OpCode::UnaryOperation {operand: left,
@@ -554,7 +620,7 @@ impl Generator {
 					self.opcodes[jump] = OpCode::Jump {operation, r#if: Some(boolean)};
 					self.registers.iter_mut().for_each(|value| *value = None);
 
-					CompileResult::Register(left)
+					CompileResult::Register(left, false)
 				}
 			},
 
@@ -564,11 +630,13 @@ impl Generator {
 				CompileResult::Evaluated(left) =>
 					if left.coerce_to_bool() {CompileResult::Evaluated(left)}
 					else {self.compile_expression(right)},
-				CompileResult::Register(left) => {
+				CompileResult::Register(left, tuple) => {
 					// cjmp {done} {left}
 					// <right compiled to {right}>
 					// reas {right} {left}
 					// <location of done>
+
+					if tuple {self.unwrap_tuple(left)}
 
 					let jump = self.opcodes.len();
 					self.opcode(OpCode::NoOp);
@@ -579,7 +647,7 @@ impl Generator {
 					self.opcodes[jump] = OpCode::Jump {operation, r#if: Some(left)};
 					self.registers.iter_mut().for_each(|value| *value = None);
 
-					CompileResult::Register(left)
+					CompileResult::Register(left, false)
 				}
 			},
 
@@ -589,7 +657,7 @@ impl Generator {
 				let destination = self.register();
 				self.opcode(OpCode::BinaryOperation {left, right, destination,
 					operation: (*operator).try_into().unwrap()});
-				CompileResult::Register(destination)
+				CompileResult::Register(destination, false)
 			},
 
 			Expression::UnaryOperation {operator, operand} => {
@@ -597,7 +665,7 @@ impl Generator {
 				let destination = self.register();
 				self.opcode(OpCode::UnaryOperation {operand, destination,
 					operation: (*operator).into()});
-				CompileResult::Register(destination)
+				CompileResult::Register(destination, false)
 			}
 		}
 	}
@@ -606,24 +674,39 @@ impl Generator {
 			-> usize {
 		let function = self.compile_expression(function);
 
-		let arguments_register = self.register();
-		self.opcode(OpCode::Create {destination: arguments_register});
+		let mut arguments = arguments.iter();
+		let arguments = match arguments.next()
+				.map(|argument| self.compile_expression(argument)) {
+			// If there is only one argument and it's a function call, use it's
+			// return values.
+			Some(CompileResult::Register(register, true))
+				if arguments.len() == 0 => register,
 
-		arguments.iter().enumerate().for_each(|(index, argument)| {
-			let value = self.compile_expression(argument).register(self);
-			let index = self.compile_known(index as i64 + 1);
-			self.opcode(OpCode::IndexWrite {indexee: arguments_register, index, value});
-		});
+			// Otherwise just use the arguments.
+			argument => {
+				let indexee = self.register();
+				self.opcode(OpCode::Create {destination: indexee});
 
-		let indexee = self.register();
-		let function = function.register(self);
-		self.opcode(OpCode::Call {function,
-			arguments: arguments_register, destination: indexee});
+				let extra = if let Some(argument) = argument {
+					let index = self.compile_known(1i64);
+					let value = argument.register(self);
+					self.opcode(OpCode::IndexWrite {indexee, index, value});
+					1
+				} else {0};
 
-		// TODO: Tuples (tuples are actually a compile time construct)
+				arguments.enumerate().for_each(|(index, argument)| {
+					let index = self.compile_known(index as i64 + 1 + extra);
+					let value = self.compile_expression(argument).register(self);
+					self.opcode(OpCode::IndexWrite {indexee, index, value});
+				});
+
+				indexee
+			}
+		};
+
 		let destination = self.register();
-		let index = self.compile_known(1i64);
-		self.opcode(OpCode::IndexRead {index, indexee, destination});
+		let function = function.register(self);
+		self.opcode(OpCode::Call {function, arguments, destination});
 		destination
 	}
 

@@ -6,5 +6,6 @@ function yay(value)
 	return "Yay!"
 end
 
-print(pcall(oops, 4))
+local a, b = pcall(oops, 4)
+print(a, b)
 print(pcall(yay, 4))

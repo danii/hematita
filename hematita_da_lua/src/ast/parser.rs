@@ -159,9 +159,22 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 
 				// actor = value
 				actor => {
-					expect!(iter.next(), Token::Assign);
-					let value = parse_expression(iter)?;
-					statements.push(Statement::Assign {actor, value, local: false})
+					let mut actors = Vec::new();
+					while let Some(Token::Comma) = iter.peek()
+						{iter.eat(); actors.push(parse_expression(iter)?)}
+					let actors = (actor, actors);
+
+					let values = if let Some(Token::Assign) = iter.peek() {
+						iter.eat();
+
+						let mut values = vec![parse_expression(iter)?];
+						while let Some(Token::Comma) = iter.peek()
+							{iter.eat(); values.push(parse_expression(iter)?)}
+
+						values
+					} else {Vec::new()};
+
+					statements.push(Statement::Assign {actors, values, local: false})
 				}
 			},
 
@@ -169,10 +182,24 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 			Some(Token::KeywordLocal) => match iter.eat_peek() {
 				// local actor = value
 				Some(Token::Identifier(_)) => {
+					// TODO: What if it's not an identifier?
 					let actor = Expression::Identifier(iter.identifier());
-					expect!(iter.next(), Token::Assign);
-					let value = parse_expression(iter)?;
-					statements.push(Statement::Assign {actor, value, local: true})
+					let mut actors = Vec::new();
+					while let Some(Token::Comma) = iter.peek()
+						{iter.eat(); actors.push(Expression::Identifier(iter.identifier()))}
+					let actors = (actor, actors);
+
+					let values = if let Some(Token::Assign) = iter.peek() {
+						iter.eat();
+
+						let mut values = vec![parse_expression(iter)?];
+						while let Some(Token::Comma) = iter.peek()
+							{iter.eat(); values.push(parse_expression(iter)?)}
+
+						values
+					} else {Vec::new()};
+
+					statements.push(Statement::Assign {actors, values, local: true})
 				},
 
 				// local function actor()
@@ -785,11 +812,11 @@ pub enum Statement {
 
 	/// An assignment operator.
 	Assign {
-		/// The name of the value to assign to.
-		actor: Expression,
+		/// The names of the variables to assign to.
+		actors: (Expression, Vec<Expression>),
 
-		/// The value to assign.
-		value: Expression,
+		/// The values to assign.
+		values: Vec<Expression>,
 
 		/// Whether or not this should be local.
 		local: bool
@@ -842,9 +869,10 @@ impl Display for Statement {
 			
 			// Assignment
 
-			Self::Assign {actor, value, local} =>
-				if *local {write!(f, "local {} = {}", actor, value)}
-				else {write!(f, "{} = {}", actor, value)},
+			Self::Assign {..} =>
+				todo!(),
+				/*if *local {write!(f, "local {} = {}", actor, value)}
+				else {write!(f, "{} = {}", actor, value)},*/
 
 			// Expressions
 
