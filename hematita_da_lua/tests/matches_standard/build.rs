@@ -53,7 +53,7 @@ fn hematita(code: &str) -> String {
 			let mut data = globals.data.lock().unwrap();
 			data.insert(Value::new_string(\"print\"), Value::NativeFunction(print));
 		}
-		globals.arc()
+		globals
 	};
 
 	let arguments = Table::default().arc();

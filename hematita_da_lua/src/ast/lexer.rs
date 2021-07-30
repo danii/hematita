@@ -46,7 +46,7 @@ impl<T> Lexer<T>
 	fn parse_identifier(&mut self) -> Option<Token> {
 		let mut identifier = String::new();
 
-		while let Some('a'..='z' | 'A'..='Z') = self.peek()
+		while let Some('a'..='z' | 'A'..='Z' | '0'..='9' | '_') = self.peek()
 			{identifier.push(self.peeked_next())}
 
 		Some(match &identifier as &str {
@@ -166,6 +166,7 @@ impl<T> Lexer<T>
 			}
 		};
 
+		let mut first = true;
 		loop {
 			match self.peek()? {
 				']' => {
@@ -194,8 +195,11 @@ impl<T> Lexer<T>
 						break Some(string)
 					}
 				},
+				'\n' if first => self.eat(),
 				_ => string.push(self.peeked_next())
 			}
+
+			first = false;
 		}
 	}
 }

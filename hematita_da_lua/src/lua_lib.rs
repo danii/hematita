@@ -125,13 +125,20 @@ pub fn r#type(arguments: Arc<Table>, _: &VirtualMachine)
 	Ok(Table::from_hashmap(vector_to_table(result)).arc())
 }
 
-pub fn standard_globals() -> Table {
-	lua_table! {
+pub fn standard_globals() -> Arc<Table> {
+	let globals = lua_table! {
 		print = Value::NativeFunction(&print),
 		type = Value::NativeFunction(&r#type),
 		setmetatable = Value::NativeFunction(&setmetatable),
 		getmetatable = Value::NativeFunction(&getmetatable),
 		pcall = Value::NativeFunction(&pcall),
 		error = Value::NativeFunction(&error)
+	}.arc();
+
+	{
+		let mut data = globals.data.lock().unwrap();
+		data.insert(Value::new_string("_G"), Value::Table(globals.clone()));
 	}
+
+	globals
 }

@@ -33,7 +33,7 @@ fn main() {
 		Ok(Arguments::Run {source, execution: ExecutionType::Run}) =>
 			run_code(&handle_io(String::try_from(source)), false),
 		Ok(Arguments::Run {source, execution: ExecutionType::RunInteractively}) =>
-			run_code(&handle_io(String::try_from(source)), false),
+			run_code(&handle_io(String::try_from(source)), true),
 		Ok(Arguments::Run {source, execution: ExecutionType::ShowByteCode}) =>
 			show_byte_code(&handle_io(String::try_from(source))),
 		Ok(Arguments::Run {source, execution: ExecutionType::ShowSyntaxTree}) =>
@@ -129,6 +129,6 @@ fn compile_expression(code: &str) -> Result<Function, ParserError> {
 }
 
 fn init_vm() -> VirtualMachine {
-	VirtualMachine::new(standard_globals().arc())
+	VirtualMachine::new(standard_globals())
 }
 
