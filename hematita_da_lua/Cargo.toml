@@ -6,6 +6,7 @@ authors = ["Daniel Conley <himself@danii.dev>"]
 
 [dependencies]
 itertools = "0.10.1"
+genawaiter = "0.99.1"
 if_chain = "1.0.1"
 maplit = "1.0.2"
 

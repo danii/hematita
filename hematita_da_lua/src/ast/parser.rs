@@ -106,6 +106,11 @@ impl<I> TokenIterator<I>
 		self.peek()
 	}
 
+	fn eat_next(&mut self) -> Option<Token> {
+		self.eat();
+		self.next()
+	}
+
 	/// Returns the next token, assuming it was peeked and matched as an
 	/// identifier.
 	fn identifier(&mut self) -> String {
@@ -155,7 +160,13 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 			Some(Token::Identifier(_)) => match parse_expression(iter)? {
 				// actor()
 				Expression::Call {function, arguments} =>
-					statements.push(Statement::Call {function: *function, arguments}),
+					statements.push(Statement::FunctionCall {
+						function: *function, arguments}),
+
+				// actor:method()
+				Expression::MethodCall {class, method, arguments} =>
+					statements.push(Statement::MethodCall {
+						class: *class, method, arguments}),
 
 				// actor = value
 				actor => {
@@ -203,21 +214,15 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 				},
 
 				// local function actor()
-				Some(Token::KeywordFunction) => {
-					let (name, arguments, body) = parse_function(iter, true)?;
-					let (name, local) = (name.unwrap(), true);
-					statements.push(Statement::Function {name, arguments, body, local})
-				},
+				Some(Token::KeywordFunction) =>
+					statements.push(parse_function_statement(iter, true)?),
 
 				_ => break Err(Error(iter.next()))
 			},
 
 			// function actor()
-			Some(Token::KeywordFunction) => {
-				let (name, arguments, body) = parse_function(iter, true)?;
-				let (name, local) = (name.unwrap(), false);
-				statements.push(Statement::Function {name, arguments, body, local})
-			},
+			Some(Token::KeywordFunction) =>
+				statements.push(parse_function_statement(iter, false)?),
 
 			// if
 			Some(Token::KeywordIf) => statements.push(parse_if(iter)?),
@@ -421,10 +426,7 @@ pub fn parse_expression_primary<I>(iter: &mut TokenIterator<I>)
 
 		// Complex literals
 		Some(Token::OpenCurly) => parse_table(iter)?,
-		Some(Token::KeywordFunction) => {
-			let (_, arguments, body) = parse_function(iter, false)?;
-			Expression::Function {arguments, body}
-		},
+		Some(Token::KeywordFunction) => parse_function_expression(iter)?,
 
 		_ => return Err(Error(iter.next()))
 	})
@@ -480,6 +482,29 @@ pub fn parse_expression_inner<I>(iter: &mut TokenIterator<I>, actor: Expression)
 
 			// No other token but an identifier is expected here.
 			_ => Err(Error(iter.next()))
+		},
+
+		// actor:
+		Some(Token::Colon) => match {iter.eat(); iter.next()} {
+			Some(Token::Identifier(method)) => {
+				let mut first = true;
+				let arguments = from_fn(|| match iter.peek() {
+					Some(Token::OpenParen) if first => {
+						iter.eat(); first = false;
+						if let Some(Token::CloseParen) = iter.peek()
+							{iter.eat(); return None}
+						Some(parse_expression(iter))
+					},
+					Some(Token::Comma) => {iter.eat(); Some(parse_expression(iter))},
+					Some(Token::CloseParen) => {iter.eat(); None},
+					_ => Some(Err(Error(iter.next())))
+				}).try_collect()?;
+
+				let class = Box::new(actor);
+				parse_expression_inner(iter,
+					Expression::MethodCall {class, method, arguments})
+			},
+			token => Err(Error(token))
 		},
 
 		// actor[]
@@ -695,18 +720,11 @@ pub fn parse_while(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 	})
 }
 
-pub fn parse_function(iter: &mut TokenIterator<impl Iterator<Item = Token>>,
-		parse_name: bool) -> Result<(Option<String>, Vec<String>, Block)> {
-	expect!(iter.next(), Token::KeywordFunction);
-	let name = if parse_name {
-		match iter.next() {
-			Some(Token::Identifier(name)) => Some(name),
-			token => return Err(Error(token))
-		}
-	} else {None};
-
+fn parse_tuple<'i, I>(iter: &'i mut TokenIterator<I>)
+		-> impl Iterator<Item = Result<String>> + 'i
+			where I: Iterator<Item = Token> {
 	let mut first = true;
-	let arguments = from_fn(|| match iter.peek() {
+	from_fn(move || match iter.peek() {
 		Some(Token::OpenParen) if first => {
 			iter.eat(); first = false;
 			match iter.next() {
@@ -724,11 +742,57 @@ pub fn parse_function(iter: &mut TokenIterator<impl Iterator<Item = Token>>,
 		},
 		Some(Token::CloseParen) => {iter.eat(); None},
 		_ => Some(Err(Error(iter.next())))
-	}).try_collect()?;
+	})
+}
+
+pub fn parse_function_statement<I>(iter: &mut TokenIterator<I>, local: bool)
+		-> Result<Statement> where I: Iterator<Item = Token> {
+	expect!(iter.next(), Token::KeywordFunction);
+
+	let name_first = match iter.next() {
+		Some(Token::Identifier(name)) => name,
+		token => return Err(Error(token))
+	};
+	let name_rest = (!local).then(|| {
+		let mut rest = Vec::new();
+		loop {
+			match iter.peek() {
+				Some(Token::Colon) => match iter.eat_next() {
+					Some(Token::Identifier(name)) => break Ok((rest, Some(name))),
+					token => return Err(Error(token))
+				},
+				Some(Token::Period) => match iter.eat_next() {
+					Some(Token::Identifier(name)) => rest.push(name),
+					token => return Err(Error(token))
+				},
+				_ => break Ok((rest, None))
+			}
+		}
+	}).transpose()?;
+
+	let arguments = parse_tuple(iter).try_collect()?;
 	let body = parse_block(iter)?;
 	expect!(iter.next(), Token::KeywordEnd);
 
-	Ok((name, arguments, body))
+	Ok(match name_rest {
+		None =>
+			Statement::LocalFunction {name: name_first, arguments, body},
+		Some((name_rest, None)) =>
+			Statement::Function {name: (name_first, name_rest), arguments, body},
+		Some((name_rest, Some(name))) =>
+			Statement::Method {class: (name_first, name_rest), name, arguments, body}
+	})
+}
+
+pub fn parse_function_expression<I>(iter: &mut TokenIterator<I>)
+		-> Result<Expression> where I: Iterator<Item = Token> {
+	expect!(iter.next(), Token::KeywordFunction);
+
+	let arguments = parse_tuple(iter).try_collect()?;
+	let body = parse_block(iter)?;
+	expect!(iter.next(), Token::KeywordEnd);
+
+	Ok(Expression::Function {arguments, body})
 }
 
 #[derive(Clone, Debug)]
@@ -824,16 +888,34 @@ pub enum Statement {
 
 	// Expressions
 
-	Call {
+	FunctionCall {
 		function: Expression,
 		arguments: Vec<Expression>
 	},
-	
+
+	MethodCall {
+		class: Expression,
+		method: String,
+		arguments: Vec<Expression>
+	},
+
 	Function {
+		name: (String, Vec<String>),
+		arguments: Vec<String>,
+		body: Block
+	},
+
+	LocalFunction {
 		name: String,
 		arguments: Vec<String>,
-		body: Block,
-		local: bool
+		body: Block
+	},
+
+	Method {
+		class: (String, Vec<String>),
+		name: String,
+		arguments: Vec<String>,
+		body: Block
 	}
 }
 
@@ -876,21 +958,36 @@ impl Display for Statement {
 
 			// Expressions
 
-			Self::Call {function, arguments} => {
+			Self::FunctionCall {function, arguments} => {
 				write!(f, "{}(", function)?;
 				arguments.iter().enumerate().try_for_each(|(index, expr)| {
 					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
 				})?;
 				write!(f, ")")
 			},
-			Self::Function {name, arguments, body, local} => {
+			/*
+			Self::Function {name, arguments, body, method, local} => {
 				if *local {write!(f, "local ")?}
-				write!(f, "function {}(", name)?;
+				write!(f, "function ")?;
+
+				once(&name.0).chain(name.1.iter()).enumerate()
+					.try_for_each(|(index, part)| {
+						if index != 0 {
+							let seperator = if index == name.1.len() && *method {':'} else {'.'};
+							write!(f, "{}{}", seperator, part)
+						} else {
+							write!(f, "{}", part)
+						}
+					})?;
+				write!(f, "(")?;
 				arguments.iter().enumerate().try_for_each(|(index, expr)| {
 					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
 				})?;
+
 				write!(f, ")\n{}end", body)
-			}
+			},*/
+
+			_ => todo!()
 		}
 	}
 }
@@ -954,6 +1051,12 @@ pub enum Expression {
 		function: Box<Expression>,
 
 		/// The provided expression arguments to be passed to the function.
+		arguments: Vec<Expression>
+	},
+
+	MethodCall {
+		class: Box<Expression>,
+		method: String,
 		arguments: Vec<Expression>
 	},
 
@@ -1046,7 +1149,9 @@ impl Display for Expression {
 				write!(f, "not {}", operand),
 
 			Self::UnaryOperation {operator, operand} =>
-				write!(f, "{}{}", operator, operand)
+				write!(f, "{}{}", operator, operand),
+
+			_ => todo!()
 		}
 	}
 }

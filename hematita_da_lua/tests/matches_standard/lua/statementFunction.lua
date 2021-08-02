@@ -4,5 +4,5 @@ function MyNameSpace.increment(value)
 	return value + 1
 end
 
-print(increment(1))
-print(increment(3))
+print(MyNameSpace.increment(1))
+print(MyNameSpace.increment(3))

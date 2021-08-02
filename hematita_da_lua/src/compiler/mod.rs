@@ -12,9 +12,9 @@ pub fn compile_block(block: &Block) -> Chunk {
 }
 
 pub fn compile_function(block: &Block, arguments: &[String],
-		up_values: HashMap<String, (usize, bool)>) -> Chunk {
+		up_values: HashMap<String, (usize, bool)>, method: bool) -> Chunk {
 	let mut compiler = Generator {up_values, ..Generator::new()};
-	compiler.compile_function_header(arguments);
+	compiler.compile_function_header(arguments, method);
 	compiler.compile(block);
 	compiler.finish()
 }
@@ -212,6 +212,8 @@ impl Generator {
 				},
 
 				Statement::GenericFor {variable, iterator, r#do} => {
+					self.prepare_side_effects();
+
 					let top = self.opcodes.len() as u64;
 					let function = self.compile_expression(iterator).register(self);
 					let arguments = self.register();
@@ -242,6 +244,8 @@ impl Generator {
 				},
 
 				Statement::NumericFor {variable, first, step, limit, r#do} => {
+					self.prepare_side_effects();
+
 					let value = self.compile_expression(first).register(self);
 					let limit = self.compile_expression(limit).register(self);
 					let step = self.compile_expression(step).register(self);
@@ -272,6 +276,8 @@ impl Generator {
 				},
 
 				Statement::While {block, condition, run_first: false} => {
+					self.prepare_side_effects();
+
 					let operation = self.opcodes.len() as u64;
 					let operand = self.compile_expression(condition).register(self);
 					self.opcode(OpCode::UnaryOperation {operand, destination: operand,
@@ -286,6 +292,8 @@ impl Generator {
 				},
 
 				Statement::While {block, condition, run_first: true} => {
+					self.prepare_side_effects();
+
 					let operation = self.opcodes.len() as u64;
 					self.compile(block);
 
@@ -447,40 +455,85 @@ impl Generator {
 
 				// Expressions
 
-				Statement::Call {function, arguments} =>
-					{self.compile_call(function, arguments);},
+				Statement::FunctionCall {function, arguments} =>
+					drop(self.compile_call(function, arguments)),
 
-				Statement::Function {name, arguments, body, local} => {
-					// We need to realize all values...
-					#[allow(clippy::needless_collect)] // Needed by borrow checker.
-					let evaluated = self.evaluated_variables.iter()
-						.map(|(name, value)| (name.clone(), value.clone()))
-						.collect::<Vec<_>>();
-					evaluated.into_iter()
-						.for_each(|(name, value)| {
-							let register = self.compile_known(value);
-							self.variables_to_registers.insert(name, register);
-						});
+				Statement::MethodCall {class, method, arguments} =>
+					drop(self.compile_method_call(class, method, arguments)),
+
+				Statement::Function
+						{name: (name_first, name_rest), arguments, body} => {
+					self.prepare_side_effects();
 
 					let register = self.register();
-					if *local {
-						self.variables_to_registers.insert(name.clone(), register);
-					}
 					let up_values = self.variables_to_registers.iter()
 						.map(|(key, &value)| (key.clone(), (value, false)))
 						.chain(self.up_values.iter()
 							.map(|(key, &(value, _))| (key.clone(), (value, true))))
 						.collect();
-
-					let function = compile_function(body, arguments, up_values);
+					let function = compile_function(body, arguments, up_values, false);
 					self.constants.push(Constant::Chunk(function.arc()));
 					let constant = self.constants.len() as u16 - 1;
 					self.opcode(OpCode::LoadConst {constant, register});
-					
-					if !*local {
+
+					if !name_rest.is_empty() {
+						let indexee = self.compile_expression(
+							&Expression::Identifier(name_first.clone())).register(self);
+						name_rest.iter().take(name_rest.len() - 1).for_each(|part| {
+							let index = self.compile_known(KnownValue::String(part.clone()));
+							self.opcode(OpCode::IndexRead {
+								indexee, index, destination: indexee});
+						});
+						let index = self.compile_known(KnownValue::String(
+							name_rest[name_rest.len() - 1].clone()));
+						self.opcode(OpCode::IndexWrite {index, indexee, value: register});
+					} else {
+						// TODO: Assigning is hard... :(
 						self.opcode(OpCode::SaveGlobal {register,
-							global: Box::leak(name.clone().into_boxed_str())});
+							global: Box::leak(name_first.clone().into_boxed_str())});
 					}
+				},
+
+				Statement::Method
+						{class: (class_first, class_rest), name, arguments, body} => {
+					self.prepare_side_effects();
+
+					let register = self.register();
+					let up_values = self.variables_to_registers.iter()
+						.map(|(key, &value)| (key.clone(), (value, false)))
+						.chain(self.up_values.iter()
+							.map(|(key, &(value, _))| (key.clone(), (value, true))))
+						.collect();
+					let function = compile_function(body, arguments, up_values, true);
+					self.constants.push(Constant::Chunk(function.arc()));
+					let constant = self.constants.len() as u16 - 1;
+					self.opcode(OpCode::LoadConst {constant, register});
+
+					let indexee = self.compile_expression(
+						&Expression::Identifier(class_first.clone())).register(self);
+					class_rest.iter().for_each(|part| {
+						let index = self.compile_known(KnownValue::String(part.clone()));
+						self.opcode(OpCode::IndexRead {
+							indexee, index, destination: indexee});
+					});
+					let index = self.compile_known(KnownValue::String(name.clone()));
+					self.opcode(OpCode::IndexWrite {index, indexee, value: register});
+				},
+
+				Statement::LocalFunction {name, arguments, body} => {
+					self.prepare_side_effects();
+
+					let register = self.register();
+					let up_values = self.variables_to_registers.iter()
+						.map(|(key, &value)| (key.clone(), (value, false)))
+						.chain(self.up_values.iter()
+							.map(|(key, &(value, _))| (key.clone(), (value, true))))
+						.collect();
+					let function = compile_function(body, arguments, up_values, false);
+					self.constants.push(Constant::Chunk(function.arc()));
+					let constant = self.constants.len() as u16 - 1;
+					self.opcode(OpCode::LoadConst {constant, register});
+					self.variables_to_registers.insert(name.clone(), register);
 				}
 			}
 
@@ -555,23 +608,13 @@ impl Generator {
 			},
 
 			Expression::Function {arguments, body} => {
-				// We need to realize all values...
-				#[allow(clippy::needless_collect)] // Needed by borrow checker.
-				let evaluated = self.evaluated_variables.iter()
-					.map(|(name, value)| (name.clone(), value.clone()))
-					.collect::<Vec<_>>();
-				evaluated.into_iter()
-					.for_each(|(name, value)| {
-						let register = self.compile_known(value);
-						self.variables_to_registers.insert(name, register);
-					});
-
+				self.prepare_side_effects();
 				let up_values = self.variables_to_registers.iter()
 					.map(|(key, &value)| (key.clone(), (value, false)))
 					.chain(self.up_values.iter()
 						.map(|(key, &(value, _))| (key.clone(), (value, true))))
 					.collect();
-				let function = compile_function(body, arguments, up_values);
+				let function = compile_function(body, arguments, up_values, false);
 				self.constants.push(Constant::Chunk(function.arc()));
 				let constant = self.constants.len() as u16 - 1;
 				let destination = self.register();
@@ -582,8 +625,15 @@ impl Generator {
 
 			// Operators
 
-			Expression::Call {function, arguments} =>
-				CompileResult::Register(self.compile_call(function, arguments), true),
+			Expression::Call {function, arguments} => {
+				let register = self.compile_call(function, arguments);
+				CompileResult::Register(register, true)
+			},
+
+			Expression::MethodCall {class, method, arguments} => {
+				let register = self.compile_method_call(class, method, arguments);
+				CompileResult::Register(register, true)
+			},
 
 			Expression::Index {indexee, index} => {
 				let destination = self.register();
@@ -670,54 +720,99 @@ impl Generator {
 		}
 	}
 
+	fn compile_tuple<'i, T>(&mut self, tuple: T) -> usize
+			where T: Iterator<Item = &'i dyn CompileOrCompiled> {
+		let mut indexee = usize::MAX;
+		let mut tuple = tuple.into_iter().peekable();
+		let mut index = 0;
+
+		loop {
+			match (tuple.next().map(|compileable| compileable.compile(self)),
+					tuple.peek().is_some()) {
+				// If there is only one argument and it's a function call, use it's
+				// return values.
+				(Some(CompileResult::Register(register, true)), false)
+						if index == 0 => break register,
+
+				(Some(CompileResult::Register(_, true)), false) => {
+					todo!()
+				},
+
+				(Some(value), _) => {
+					if index == 0 {
+						indexee = self.register();
+						self.opcode(OpCode::Create {destination: indexee});
+					}
+
+					index += 1;
+					let index = self.compile_known(index as i64);
+					let value = value.register(self);
+					self.opcode(OpCode::IndexWrite {indexee, index, value});
+				},
+
+				(None, _) => {
+					if index == 0 {
+						indexee = self.register();
+						self.opcode(OpCode::Create {destination: indexee});
+					}
+
+					let value = self.compile_known(index as i64);
+					let index = self.compile_known(0);
+					self.opcode(OpCode::IndexWrite {indexee, index, value});
+					break indexee
+				}
+			}
+		}
+	}
+
 	fn compile_call(&mut self, function: &Expression, arguments: &[Expression])
 			-> usize {
-		let function = self.compile_expression(function);
-
-		let mut arguments = arguments.iter();
-		let arguments = match arguments.next()
-				.map(|argument| self.compile_expression(argument)) {
-			// If there is only one argument and it's a function call, use it's
-			// return values.
-			Some(CompileResult::Register(register, true))
-				if arguments.len() == 0 => register,
-
-			// Otherwise just use the arguments.
-			argument => {
-				let indexee = self.register();
-				self.opcode(OpCode::Create {destination: indexee});
-
-				let extra = if let Some(argument) = argument {
-					let index = self.compile_known(1i64);
-					let value = argument.register(self);
-					self.opcode(OpCode::IndexWrite {indexee, index, value});
-					1
-				} else {0};
-
-				arguments.enumerate().for_each(|(index, argument)| {
-					let index = self.compile_known(index as i64 + 1 + extra);
-					let value = self.compile_expression(argument).register(self);
-					self.opcode(OpCode::IndexWrite {indexee, index, value});
-				});
-
-				indexee
-			}
-		};
-
+		let function = self.compile_expression(function).register(self);
+		let arguments = self.compile_tuple(
+			arguments.iter().map(CompileOrCompiled::r#dyn));
 		let destination = self.register();
-		let function = function.register(self);
 		self.opcode(OpCode::Call {function, arguments, destination});
 		destination
 	}
 
-	fn compile_function_header(&mut self, arguments: &[String]) {
+	fn compile_method_call(&mut self, class: &Expression, method: &str,
+			arguments: &[Expression]) -> usize {
+		let class = self.compile_expression(class);
+		let arguments = self.compile_tuple(once(class.r#dyn())
+			.chain(arguments.iter().map(CompileOrCompiled::r#dyn)));
+		let method = self.compile_known(KnownValue::String(method.to_owned()));
+
+		let class = class.register(self);
+		let destination = self.register();
+		self.opcode(OpCode::IndexRead {indexee: class, index: method, destination});
+		self.opcode(OpCode::Call {function: destination, arguments, destination});
+		destination
+	}
+
+	fn compile_function_header(&mut self, arguments: &[String], method: bool) {
 		let indexee = 0; // Function arguments...
-		arguments.iter().enumerate().for_each(|(index, argument)| {
+
+		method.then(|| "self".to_string()).iter().chain(arguments.iter())
+				.enumerate().for_each(|(index, argument)| {
 			let index = self.compile_known(index as i64 + 1);
 			let value = self.register();
 			self.opcode(OpCode::IndexRead {index, indexee, destination: value});
 			self.variables_to_registers.insert(argument.clone(), value);
 		});
+	}
+
+	fn prepare_side_effects(&mut self) {
+		// We need to realize all values...
+		#[allow(clippy::needless_collect)] // Needed by borrow checker.
+		let evaluated = self.evaluated_variables.iter()
+			.map(|(name, value)| (name.clone(), value.clone()))
+			.collect::<Vec<_>>();
+		evaluated.into_iter()
+			.for_each(|(name, value)| {
+				let register = self.compile_known(value);
+				self.variables_to_registers.insert(name, register);
+				self.registers[register] = None;
+			});
 	}
 }
 
@@ -731,5 +826,28 @@ impl Default for Generator {
 			up_values: HashMap::default(),
 			variables_to_registers: HashMap::default()
 		}
+	}
+}
+
+// Silly trait because silly borrow checker problems. Perhaps this could be used
+// more in normal code?
+trait CompileOrCompiled {
+	fn compile(&self, compiler: &mut Generator) -> CompileResult;
+
+	fn r#dyn(&self) -> &dyn CompileOrCompiled
+			where Self: Sized {
+		self as &dyn CompileOrCompiled
+	}
+}
+
+impl CompileOrCompiled for CompileResult {
+	fn compile(&self, _: &mut Generator) -> CompileResult {
+		self.clone()
+	}
+}
+
+impl CompileOrCompiled for Expression {
+	fn compile(&self, compiler: &mut Generator) -> CompileResult {
+		compiler.compile_expression(self)
 	}
 }
