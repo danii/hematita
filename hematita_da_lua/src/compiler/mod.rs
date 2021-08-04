@@ -1,9 +1,20 @@
 use self::super::{
 	ast::parser::{BinaryOperator, Block, Expression, KeyValue, Statement},
-	vm::{constant::{Constant, KnownValue}, Chunk, BinaryOperation, OpCode, UnaryOperation}
+	vm::{
+		constant::{Constant, KnownValue},
+		Chunk, BinaryOperation, OpCode, UnaryOperation
+	}
 };
 use std::{collections::HashMap, convert::TryInto, iter::once};
 use if_chain::if_chain;
+
+#[macro_export]
+macro_rules! insert_byte_code {
+	($into:ident {$($code:tt)*}) => {{
+		use $crate::byte_code;
+		$into.opcodes.extend(byte_code! {$($code)*});
+	}}
+}
 
 pub fn compile_block(block: &Block) -> Chunk {
 	let mut compiler = Generator::new();

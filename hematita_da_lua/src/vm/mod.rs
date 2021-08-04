@@ -71,6 +71,321 @@ macro_rules! binary_equality {
 	}
 }
 
+#[macro_export]
+macro_rules! byte_code {
+	($($code:tt)*) => {{
+		use $crate::byte_code_inner;
+
+		#[allow(non_camel_case_types)]
+		struct byte_code<F>
+				where F: Fn(&mut usize) -> Option<OpCode<'static>> {
+			index: usize,
+			next: F
+		}
+
+		impl<F> Iterator for byte_code<F>
+				where F: Fn(&mut usize) -> Option<OpCode<'static>> {
+			type Item = OpCode<'static>;
+
+			fn next(&mut self) -> Option<OpCode<'static>> {
+				(self.next)(&mut self.index)
+			}
+		}
+
+		byte_code {
+			index: 0,
+			next: |index| {
+				#[allow(unused_mut, unused_variable)]
+				let mut counter = 0;
+				let value = byte_code_inner!(index counter {$($code)*});
+				if let Some(_) = &value {*index += 1}
+				value
+			}
+		}
+	}}
+}
+
+#[macro_export]
+macro_rules! byte_code_inner {
+	($index:ident $counter:ident {call $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::Call {function: $a, arguments: $b, destination: $c})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {idxr $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::IndexRead {indexee: $a, index: $b, destination: $c})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {idxw $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::IndexWrite {indexee: $a, index: $b, value: $c})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {crt $a:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::Create {destination: $a})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Arithmetic
+	($index:ident $counter:ident {aadd $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Add})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {asub $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Subtract})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {amul $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Multiply})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {adiv $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Divide})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {afdiv $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::FloorDivide})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {aexp $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Exponent})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {amod $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Modulo})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Bitwise
+	($index:ident $counter:ident {band $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::BitwiseAnd})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {bor $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::BitwiseOr})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {bxor $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::BitwiseXOr})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {bshl $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::ShiftLeft})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {bshr $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::ShiftRight})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Relational
+	($index:ident $counter:ident {req $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Equal})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {rne $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::NotEqual})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {rlt $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::LessThan})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {rle $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::LessThanOrEqual})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {rgt $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::GreaterThan})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {rge $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::GreaterThanOrEqual})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Other
+	($index:ident $counter:ident {cat $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Concat})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Arithmetic
+	($index:ident $counter:ident {aneg $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::UnaryOperation {operand: $a, destination: $b, operation: UnaryOperation::Negate})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Bitwise
+	($index:ident $counter:ident {bnot $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::UnaryOperation {operand: $a, destination: $b, operation: UnaryOperation::BitwiseNot})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Logical
+	($index:ident $counter:ident {not $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::UnaryOperation {operand: $a, destination: $b, operation: UnaryOperation::LogicalNot})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Other
+	($index:ident $counter:ident {len $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::UnaryOperation {operand: $a, destination: $b, operation: UnaryOperation::Length})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	($index:ident $counter:ident {jmp $a:ident $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::Jump {operation: $a, r#if: None})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {cjmp $a:ident, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::Jump {operation: $a, r#if: Some($b)})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {ret $a:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::Return {result: $a})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {reas $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::ReAssign {actor: $a, destination: $b})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {lcst [$a:expr], $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::LoadConst {constant: $a, register: $b})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {lglb {$a:expr}, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::LoadGlobal {global: $a, register: $b})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {sglb $a:expr, {$b:expr} $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::SaveGlobal {register: $a, global: $b})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {luv [^$a:expr], $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::LoadUpValue {up_value: $a, register: $b})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {suv $a:expr, [^$b:expr] $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::SaveUpValue {register: $a, up_value: $b})
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {noop $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::NoOp)
+		} else {
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {}) => {None}
+}
+
 #[derive(Clone, Copy)]
 enum Reference<'s> {
 	Local(usize),
@@ -761,35 +1076,97 @@ impl<'s> Display for OpCode<'s> {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		match self {
 			Self::Call {function, arguments, destination} =>
-				write!(f, "call {} {} {}", function, arguments, destination),
+				write!(f, "call {}, {}, {};", function, arguments, destination),
 			Self::IndexRead {indexee, index, destination} =>
-				write!(f, "idxr {} {} {}", indexee, index, destination),
+				write!(f, "idxr {}, {}, {};", indexee, index, destination),
 			Self::IndexWrite {indexee, index, value} =>
-				write!(f, "idxw {} {} {}", indexee, index, value),
+				write!(f, "idxw {}, {}, {};", indexee, index, value),
 			Self::Create {destination} =>
-				write!(f, "crt {}", destination),
-			Self::BinaryOperation {left, right, destination, ..} =>
-				write!(f, "biop {} {} {}", left, right, destination),
-			Self::UnaryOperation {operand, destination, ..} =>
-				write!(f, "unop {} {}", operand, destination),
+				write!(f, "crt {};", destination),
+			Self::BinaryOperation {left, right, destination, operation} =>
+					match operation {
+				// Arithmetic
+				BinaryOperation::Add =>
+					write!(f, "aadd {}, {}, {};", left, right, destination),
+				BinaryOperation::Subtract =>
+					write!(f, "asub {}, {}, {};", left, right, destination),
+				BinaryOperation::Multiply =>
+					write!(f, "amul {}, {}, {};", left, right, destination),
+				BinaryOperation::Divide =>
+					write!(f, "adiv {}, {}, {};", left, right, destination),
+				BinaryOperation::FloorDivide =>
+					write!(f, "afdiv {}, {}, {};", left, right, destination),
+				BinaryOperation::Exponent =>
+					write!(f, "aexp {}, {}, {};", left, right, destination),
+				BinaryOperation::Modulo =>
+					write!(f, "amod {}, {}, {};", left, right, destination),
+
+				// Bitwise
+				BinaryOperation::BitwiseAnd =>
+					write!(f, "band {}, {}, {};", left, right, destination),
+				BinaryOperation::BitwiseOr =>
+					write!(f, "bor {}, {}, {};", left, right, destination),
+				BinaryOperation::BitwiseXOr =>
+					write!(f, "bxor {}, {}, {};", left, right, destination),
+				BinaryOperation::ShiftLeft =>
+					write!(f, "bshl {}, {}, {};", left, right, destination),
+				BinaryOperation::ShiftRight =>
+					write!(f, "bshr {}, {}, {};", left, right, destination),
+
+				// Relational
+				BinaryOperation::Equal =>
+					write!(f, "req {}, {}, {};", left, right, destination),
+				BinaryOperation::NotEqual =>
+					write!(f, "rne {}, {}, {};", left, right, destination),
+				BinaryOperation::LessThan =>
+					write!(f, "rlt {}, {}, {};", left, right, destination),
+				BinaryOperation::LessThanOrEqual =>
+					write!(f, "rle {}, {}, {};", left, right, destination),
+				BinaryOperation::GreaterThan =>
+					write!(f, "rgt {}, {}, {};", left, right, destination),
+				BinaryOperation::GreaterThanOrEqual =>
+					write!(f, "rge {}, {}, {};", left, right, destination),
+
+				// Other
+				BinaryOperation::Concat =>
+					write!(f, "cat {}, {}, {};", left, right, destination)
+			},
+			Self::UnaryOperation {operand, destination, operation} =>
+					match operation {
+				// Arithmetic
+				UnaryOperation::Negate =>
+					write!(f, "aneg {}, {};", operand, destination),
+
+				// Bitwise
+				UnaryOperation::BitwiseNot =>
+					write!(f, "bnot {}, {};", operand, destination),
+
+				// Logical
+				UnaryOperation::LogicalNot =>
+					write!(f, "not {}, {};", operand, destination),
+
+				// Other
+				UnaryOperation::Length =>
+					write!(f, "len {}, {};", operand, destination)
+			},
 			Self::Jump {operation, r#if: None} =>
-				write!(f, "jmp {}", operation),
+				write!(f, "jmp {};", operation),
 			Self::Jump {operation, r#if: Some(r#if)} =>
-				write!(f, "cjmp {} {}", operation, r#if),
+				write!(f, "cjmp {}, {};", operation, r#if),
 			Self::Return {result} =>
-				write!(f, "ret {}", result),
+				write!(f, "ret {};", result),
 			Self::ReAssign {actor, destination} =>
-				write!(f, "reas {} {}", actor, destination),
+				write!(f, "reas {}, {};", actor, destination),
 			Self::LoadConst {constant, register} =>
-				write!(f, "lcst <{}> {}", constant, register),
+				write!(f, "lcst [{}], {};", constant, register),
 			Self::LoadGlobal {global, register} =>
-				write!(f, "lglb ({}) {}", global, register),
+				write!(f, "lglb {{{}}}, {};", global, register),
 			Self::SaveGlobal {register, global} =>
-				write!(f, "sglb {} ({})", register, global),
+				write!(f, "sglb {}, {{{}}};", register, global),
 			Self::LoadUpValue {up_value, register} =>
-				write!(f, "luv [{}] {}", up_value, register),
+				write!(f, "luv ^{}, {};", up_value, register),
 			Self::SaveUpValue {register, up_value} =>
-				write!(f, "suv {} [{}]", register, up_value),
+				write!(f, "suv {}, ^{};", register, up_value),
 			Self::NoOp =>
 				write!(f, "noop")
 		}
@@ -909,21 +1286,43 @@ impl Chunk {
 	pub fn arc(self) -> Arc<Self> {
 		Arc::new(self)
 	}
+
+	fn recursive_fmt(&self, f: &mut Formatter, id: &mut usize) -> FMTResult {
+		let my_id = *id;
+		*id += 1;
+
+		let mut id_map = HashMap::new();
+		self.constants.iter().enumerate()
+			.try_for_each(|(index, constant)| match constant {
+				Constant::Chunk(chunk) => {
+					id_map.insert(index, *id);
+					chunk.recursive_fmt(f, id)
+				},
+				_ => Ok(())
+			})?;
+
+		write!(f, ".function{}<{}>;", my_id, self.registers)?;
+		self.constants.iter().enumerate()
+			.try_for_each(|(index, constant)| match (id_map.get(&index), constant) {
+				(Some(id), _) if index == 0 => write!(f, " .function{}", id),
+				(Some(id), _) => write!(f, ", .function{}", id),
+				(_, constant) if index == 0 => {write!(f, " ")?; constant.fmt(f)},
+				(_, constant) => {write!(f, " ")?; constant.fmt(f)}
+			})?;
+		writeln!(f, ";")?;
+
+		self.opcodes.iter().enumerate()
+			.try_for_each(|(index, opcode)| {
+				if index != 0 {writeln!(f)?}
+				opcode.fmt(f)
+			})?;
+		writeln!(f, "\n")
+	}
 }
 
 impl Display for Chunk {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
-		writeln!(f, "registers: {}\nconstants:", self.registers)?;
-		self.constants.iter().enumerate()
-			.try_for_each(|(index, constant)| {
-				if index != 0 {writeln!(f)?}
-				write!(f, "\t{}: ", index)?; constant.fmt(f)
-			})?;
-		writeln!(f)?;
-		self.opcodes.iter().enumerate()
-			.try_for_each(|(index, opcode)| {
-				if index != 0 {writeln!(f)?}
-				write!(f, "{}: ", index)?; opcode.fmt(f)
-			})
+		let mut id = 0;
+		self.recursive_fmt(f, &mut id)
 	}
 }
