@@ -270,14 +270,14 @@ impl Generator {
 					};
 
 					let operation = self.opcodes.len() as u64;
-					self.opcode(OpCode::BinaryOperation {left: value, right: limit,
-						operation: BinaryOperation::Equal, destination: condition});
-					let jump = self.opcodes.len();
-					self.opcode(OpCode::NoOp);
 					self.registers.iter_mut().for_each(|value| *value = None);
 
 					self.variables_to_registers.insert(variable.clone(), value);
 					self.compile(r#do);
+					self.opcode(OpCode::BinaryOperation {left: value, right: limit,
+						operation: BinaryOperation::Equal, destination: condition});
+					let jump = self.opcodes.len();
+					self.opcode(OpCode::NoOp);
 					self.opcode(OpCode::BinaryOperation {left: value, right: step,
 						operation: BinaryOperation::Add, destination: value});
 					self.opcode(OpCode::Jump {operation, r#if: None});
