@@ -1,5 +1,7 @@
 pub mod constant;
 pub mod value;
+#[cfg(test)]
+pub mod tests;
 
 use self::{
 	super::ast::parser::{BinaryOperator, UnaryOperator},
@@ -69,321 +71,6 @@ macro_rules! binary_equality {
 				NonNil(Value::Boolean(left $rust_op right)),
 		}
 	}
-}
-
-#[macro_export]
-macro_rules! byte_code {
-	($($code:tt)*) => {{
-		use $crate::byte_code_inner;
-
-		#[allow(non_camel_case_types)]
-		struct byte_code<F>
-				where F: Fn(&mut usize) -> Option<OpCode<'static>> {
-			index: usize,
-			next: F
-		}
-
-		impl<F> Iterator for byte_code<F>
-				where F: Fn(&mut usize) -> Option<OpCode<'static>> {
-			type Item = OpCode<'static>;
-
-			fn next(&mut self) -> Option<OpCode<'static>> {
-				(self.next)(&mut self.index)
-			}
-		}
-
-		byte_code {
-			index: 0,
-			next: |index| {
-				#[allow(unused_mut, unused_variable)]
-				let mut counter = 0;
-				let value = byte_code_inner!(index counter {$($code)*});
-				if let Some(_) = &value {*index += 1}
-				value
-			}
-		}
-	}}
-}
-
-#[macro_export]
-macro_rules! byte_code_inner {
-	($index:ident $counter:ident {call $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::Call {function: $a, arguments: $b, destination: $c})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {idxr $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::IndexRead {indexee: $a, index: $b, destination: $c})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {idxw $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::IndexWrite {indexee: $a, index: $b, value: $c})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {crt $a:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::Create {destination: $a})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-
-	// Arithmetic
-	($index:ident $counter:ident {aadd $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Add})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {asub $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Subtract})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {amul $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Multiply})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {adiv $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Divide})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {afdiv $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::FloorDivide})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {aexp $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Exponent})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {amod $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Modulo})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-
-	// Bitwise
-	($index:ident $counter:ident {band $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::BitwiseAnd})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {bor $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::BitwiseOr})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {bxor $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::BitwiseXOr})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {bshl $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::ShiftLeft})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {bshr $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::ShiftRight})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-
-	// Relational
-	($index:ident $counter:ident {req $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Equal})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {rne $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::NotEqual})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {rlt $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::LessThan})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {rle $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::LessThanOrEqual})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {rgt $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::GreaterThan})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {rge $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::GreaterThanOrEqual})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-
-	// Other
-	($index:ident $counter:ident {cat $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Concat})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-
-	// Arithmetic
-	($index:ident $counter:ident {aneg $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::UnaryOperation {operand: $a, destination: $b, operation: UnaryOperation::Negate})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-
-	// Bitwise
-	($index:ident $counter:ident {bnot $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::UnaryOperation {operand: $a, destination: $b, operation: UnaryOperation::BitwiseNot})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-
-	// Logical
-	($index:ident $counter:ident {not $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::UnaryOperation {operand: $a, destination: $b, operation: UnaryOperation::LogicalNot})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-
-	// Other
-	($index:ident $counter:ident {len $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::UnaryOperation {operand: $a, destination: $b, operation: UnaryOperation::Length})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-
-	($index:ident $counter:ident {jmp $a:ident $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::Jump {operation: $a, r#if: None})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {cjmp $a:ident, $b:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::Jump {operation: $a, r#if: Some($b)})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {ret $a:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::Return {result: $a})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {reas $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::ReAssign {actor: $a, destination: $b})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {lcst [$a:expr], $b:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::LoadConst {constant: $a, register: $b})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {lglb {$a:expr}, $b:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::LoadGlobal {global: $a, register: $b})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {sglb $a:expr, {$b:expr} $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::SaveGlobal {register: $a, global: $b})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {luv [^$a:expr], $b:expr $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::LoadUpValue {up_value: $a, register: $b})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {suv $a:expr, [^$b:expr] $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::SaveUpValue {register: $a, up_value: $b})
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {noop $(; $($rest:tt)*)?}) => {
-		if *$index == $counter {
-			Some(OpCode::NoOp)
-		} else {
-			byte_code_inner!($index $counter {$($($rest)*)?})
-		}
-	};
-	($index:ident $counter:ident {}) => {None}
 }
 
 #[derive(Clone, Copy)]
@@ -1325,4 +1012,360 @@ impl Display for Chunk {
 		let mut id = 0;
 		self.recursive_fmt(f, &mut id)
 	}
+}
+
+#[macro_export]
+macro_rules! byte_code {
+	($($code:tt)*) => {{
+		use $crate::byte_code_inner;
+
+		#[allow(non_camel_case_types)]
+		struct byte_code<F>
+				where F: Fn(&mut usize) -> Option<OpCode<'static>> + 'static {
+			index: usize,
+			next: F,
+			//_d: std::marker::PhantomData<&'f ()>
+		}
+
+		impl<F> Iterator for byte_code<F>
+				where F: Fn(&mut usize) -> Option<OpCode<'static>> {
+			type Item = OpCode<'static>;
+
+			fn next(&mut self) -> Option<OpCode<'static>> {
+				(self.next)(&mut self.index)
+			}
+		}
+
+		byte_code {
+			index: 0,
+			next: move |index| {
+				#[allow(unused_mut, unused_variable, unused_assignments)]
+				{
+					let mut counter = 0;
+					let value = byte_code_inner!(index counter {$($code)*});
+					if let Some(_) = &value {*index += 1}
+					value
+				}
+			},
+			//_d: std::marker::PhantomData
+		}
+	}}
+}
+
+#[macro_export]
+macro_rules! byte_code_inner {
+	($index:ident $counter:ident {call $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::Call {function: $a, arguments: $b, destination: $c})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {idxr $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::IndexRead {indexee: $a, index: $b, destination: $c})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {idxw $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::IndexWrite {indexee: $a, index: $b, value: $c})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {crt $a:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::Create {destination: $a})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Arithmetic
+	($index:ident $counter:ident {aadd $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Add})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {asub $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Subtract})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {amul $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Multiply})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {adiv $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Divide})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {afdiv $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::FloorDivide})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {aexp $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Exponent})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {amod $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Modulo})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Bitwise
+	($index:ident $counter:ident {band $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::BitwiseAnd})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {bor $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::BitwiseOr})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {bxor $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::BitwiseXOr})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {bshl $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::ShiftLeft})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {bshr $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::ShiftRight})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Relational
+	($index:ident $counter:ident {req $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Equal})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {rne $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::NotEqual})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {rlt $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::LessThan})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {rle $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::LessThanOrEqual})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {rgt $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::GreaterThan})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {rge $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::GreaterThanOrEqual})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Other
+	($index:ident $counter:ident {cat $a:expr, $b:expr, $c:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::BinaryOperation {left: $a, right: $b, destination: $c, operation: BinaryOperation::Concat})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Arithmetic
+	($index:ident $counter:ident {aneg $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::UnaryOperation {operand: $a, destination: $b, operation: UnaryOperation::Negate})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Bitwise
+	($index:ident $counter:ident {bnot $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::UnaryOperation {operand: $a, destination: $b, operation: UnaryOperation::BitwiseNot})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Logical
+	($index:ident $counter:ident {not $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::UnaryOperation {operand: $a, destination: $b, operation: UnaryOperation::LogicalNot})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	// Other
+	($index:ident $counter:ident {len $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::UnaryOperation {operand: $a, destination: $b, operation: UnaryOperation::Length})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+
+	($index:ident $counter:ident {jmp $a:ident $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::Jump {operation: $a, r#if: None})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {cjmp $a:ident, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::Jump {operation: $a, r#if: Some($b)})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {ret $a:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::Return {result: $a})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {reas $a:expr, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::ReAssign {actor: $a, destination: $b})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {lcst [$a:expr], $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::LoadConst {constant: $a, register: $b})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {lglb {$a:expr}, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::LoadGlobal {global: $a, register: $b})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {sglb $a:expr, {$b:expr} $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::SaveGlobal {register: $a, global: $b})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {luv ^$a:expr, $b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::LoadUpValue {up_value: $a, register: $b})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {suv $a:expr, ^$b:expr $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::SaveUpValue {register: $a, up_value: $b})
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {noop $(; $($rest:tt)*)?}) => {
+		if *$index == $counter {
+			Some(OpCode::NoOp)
+		} else {
+			$counter += 1;
+			byte_code_inner!($index $counter {$($($rest)*)?})
+		}
+	};
+	($index:ident $counter:ident {}) => {None}
 }

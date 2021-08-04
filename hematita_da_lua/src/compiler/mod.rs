@@ -1,3 +1,5 @@
+use crate::ast::parser::AssignmentTarget;
+
 use self::super::{
 	ast::parser::{BinaryOperator, Block, Expression, KeyValue, Statement},
 	vm::{
@@ -6,7 +8,6 @@ use self::super::{
 	}
 };
 use std::{collections::HashMap, convert::TryInto, iter::once};
-use if_chain::if_chain;
 
 #[macro_export]
 macro_rules! insert_byte_code {
@@ -332,62 +333,146 @@ impl Generator {
 					self.opcode(OpCode::Return {result: destination});
 				},
 
-				// Assign
+				// Assignment
 
-				Statement::Assign {actors, values, local} => {
-					// TODO: This is **j a n k**-tastic
+				Statement::Assign {variables, values} => {
+					let mut variables = once(&variables.0).chain(variables.1.iter());
+					let mut names = Vec::new();
+					let mut value = {
+						let values: Vec<_> = values.iter()
+							.map(|value| self.compile_expression(value)).collect();
+						iter_tuple(values.into_iter())
+					};
 
-					enum ValuesType<M>
-							where M: Iterator<Item = CompileResult> {
-						MultipleValues(M),
-						FunctionCall(usize, i64)
-					}
-
-					impl<M> ValuesType<M>
-							where M: Iterator<Item = CompileResult> {
-						#[inline]
-						fn next(&mut self, soup: &mut Generator, temporary: usize)
-								-> CompileResult {
-							match self {
-								Self::MultipleValues(iter) => match iter.next() {
-									Some(value) => value,
-									None => CompileResult::Register(temporary, false)
+					while let Some(target) = variables.next() {
+							match (target, value(self)) {
+						(AssignmentTarget::Identifier(identifier),
+								CompileResult::Evaluated(value)) => match (
+							self.evaluated_variables.get(identifier),
+							self.variables_to_registers.get(identifier),
+							self.up_values.get(identifier)
+						) {
+							(Some(_), _, _) => names.push((identifier.clone(),
+								CompileResult::Evaluated(value))),
+							(None, Some(&register), _) => {
+								// TODO: We could probably add destination to compile_known?
+								let old = self.compile_known(value.clone());
+								insert_byte_code!(self {reas old, register});
+								self.registers[register] = Some(value);
+							},
+							(None, None, Some(&up_value)) => {
+								let register = self.compile_known(value);
+								let up_value = self.up_value_id(up_value);
+								insert_byte_code!(self {suv register, ^up_value})
+							},
+							(None, None, None) => {
+								let global = Box::leak(identifier.clone().into_boxed_str());
+								let register = self.compile_known(value);
+								self.opcode(OpCode::SaveGlobal {register, global});
+								// FIXME: Requires GATs
+								//insert_byte_code!(self {sglb register, {&*global}});
+							},
+						},
+						(AssignmentTarget::Identifier(identifier),
+								CompileResult::Register(old, tuple)) => {
+							if tuple {self.unwrap_tuple(old)}
+							match (
+								self.evaluated_variables.get(identifier),
+								self.variables_to_registers.get(identifier),
+								self.up_values.get(identifier)
+							) {
+								(Some(_), _, _) => names.push((identifier.clone(),
+									CompileResult::Register(old, false))),
+								// TODO: This is what destination in compile_expression was
+								// for.
+								(None, Some(&new), _) =>
+									insert_byte_code!(self {reas old, new}),
+								(None, None, Some(&up_value)) => {
+									let up_value = self.up_value_id(up_value);
+									insert_byte_code!(self {suv old, ^up_value})
 								},
-								&mut Self::FunctionCall(indexee, ref mut index) => {
-									*index += 1;
-
-									let index = soup.compile_known(*index);
-									soup.opcode(OpCode::IndexRead {index, indexee,
-										destination: temporary});
-
-									CompileResult::Register(temporary, false)
+								(None, None, None) => {
+									let global = Box::leak(identifier.clone().into_boxed_str());
+									self.opcode(OpCode::SaveGlobal {register: old, global});
+									// FIXME: Requires GATs
+									//insert_byte_code!(self {sglb register, {&*global}});
 								}
 							}
 						}
-					}
-
-					let temporary = self.register();
-					let mut actors = once(&actors.0).chain(actors.1.iter());
-					let mut values = {
-						let values = values.iter()
-							.map(|value| self.compile_expression(value))
-							.collect::<Vec<_>>();
-						if_chain! {
-							if values.len() == 1;
-							if let CompileResult::Register(register, true) = values[0];
-							then {
-								ValuesType::FunctionCall(register, 0)
-							} else {
-								ValuesType::MultipleValues(values.into_iter())
-							}
+						(AssignmentTarget::Index {indexee, index},
+								CompileResult::Evaluated(value)) => {
+							let indexee = self.compile_expression(indexee).register(self);
+							let index = self.compile_expression(index).register(self);
+							let register = self.compile_known(value);
+							insert_byte_code!(self {idxw indexee, index, register});
+						},
+						(AssignmentTarget::Index {indexee, index},
+								CompileResult::Register(value, tuple)) => {
+							if tuple {self.unwrap_tuple(value)}
+							let indexee = self.compile_expression(indexee).register(self);
+							let index = self.compile_expression(index).register(self);
+							insert_byte_code!(self {idxw indexee, index, value});
 						}
+					}}
+
+					names.into_iter()
+						.for_each(|(name, value)| match value {
+							CompileResult::Register(value, _) => {
+								self.evaluated_variables.remove(&name);
+								self.variables_to_registers.insert(name, value);
+							},
+							CompileResult::Evaluated(value) => {
+								// TODO: Next line may not be necessary?
+								self.variables_to_registers.remove(&name);
+								self.evaluated_variables.insert(name, value);
+							}
+						});
+				},
+
+				Statement::LocalAssign {variables, values} => {
+					let mut variables = once(&variables.0).chain(variables.1.iter());
+					let mut names = Vec::new();
+					let mut value = {
+						let values: Vec<_> = values.iter()
+							.map(|value| self.compile_expression(value)).collect();
+						iter_tuple(values.into_iter())
 					};
 
-					let mut clea = Vec::new();
+					while let Some(name) = variables.next() {match value(self) {
+						CompileResult::Evaluated(value) => {
+							// We don't have to assign this variable immediately, because
+							// it's known.
+							names.push((name.clone(),
+								CompileResult::Evaluated(value)));
+						},
+						CompileResult::Register(register, tuple) => {
+							// identifier already has it's own register. We don't want to
+							// be able to change it's data if we write to the new
+							// variable, so we make a new register, and reassign.
 
-					while let Some(actor) = actors.next() {match (
-							*local, actor, values.next(self, temporary)) {
-						(true, Expression::Identifier(name),
+							let destination = self.register();
+							if tuple {self.unwrap_tuple(register)}
+							insert_byte_code!(self {reas register, destination});
+							names.push((name.clone(),
+								CompileResult::Register(destination, false)));
+						}
+					}}
+
+					names.into_iter()
+						.for_each(|(name, value)| match value {
+							CompileResult::Register(value, _) => {
+								self.evaluated_variables.remove(&name);
+								self.variables_to_registers.insert(name, value);
+							},
+							CompileResult::Evaluated(value) => {
+								// TODO: Next line may not be necessary?
+								self.variables_to_registers.remove(&name);
+								self.evaluated_variables.insert(name, value);
+							}
+						});
+				},
+				/*
+				(true, Expression::Identifier(name),
 								CompileResult::Evaluated(value)) => {
 							// We don't have to assign this variable immediately, because
 							// it's known.
@@ -404,69 +489,7 @@ impl Generator {
 
 							clea.push((name.clone(), CompileResult::Register(destination, false)));
 						},
-						(true, _, _) => panic!(),
-						(false, Expression::Identifier(identifier), value) => match (
-							value,
-							self.evaluated_variables.get(identifier),
-							self.variables_to_registers.get(identifier),
-							self.up_values.get(identifier)
-						) {
-							(CompileResult::Evaluated(value), Some(_), _, _) => {
-								clea.push((identifier.clone(), CompileResult::Evaluated(value)));
-							},
-							(CompileResult::Register(register, tuple), Some(_), _, _) => {
-								clea.push((identifier.clone(), CompileResult::Register(register, false)));
-								if tuple {self.unwrap_tuple(register)}
-							},
-							(CompileResult::Evaluated(value), None, Some(&register), _) => {
-								// TODO: We could probably add destination to compile_known?
-								let old = self.compile_known(value.clone());
-								self.opcode(OpCode::ReAssign {actor: old, destination: register});
-								self.registers[register] = Some(value);
-							},
-							(CompileResult::Register(old, tuple), None, Some(&new), _) => {
-								// TODO: This is what destination in compile_expression was for.
-								if tuple {self.unwrap_tuple(old)}
-								self.opcode(OpCode::ReAssign {actor: old, destination: new});
-							},
-							(CompileResult::Evaluated(value),
-									None, None, Some(&up_value)) => {
-								let register = self.compile_known(value);
-								self.opcode(OpCode::SaveUpValue {register, up_value: self.up_value_id(up_value)});
-							},
-							(CompileResult::Register(register, tuple),
-									None, None, Some(&up_value)) => {
-								if tuple {self.unwrap_tuple(register)}
-								self.opcode(OpCode::SaveUpValue {register, up_value: self.up_value_id(up_value)})
-							},
-							(CompileResult::Evaluated(value), None, None, None) => {
-								let global = Box::leak(identifier.clone().into_boxed_str());
-								let register = self.compile_known(value);
-								self.opcode(OpCode::SaveGlobal {register, global});
-							},
-							(CompileResult::Register(register, tuple), None, None, None) => {
-								if tuple {self.unwrap_tuple(register)}
-
-								let global = Box::leak(identifier.clone().into_boxed_str());
-								self.opcode(OpCode::SaveGlobal {register, global});
-							}
-						},
-						(false, _, _) => panic!()
-					}}
-
-					clea.into_iter()
-						.for_each(|(name, value)| match value {
-							CompileResult::Register(value, _) => {
-								self.evaluated_variables.remove(&name);
-								self.variables_to_registers.insert(name, value);
-							},
-							CompileResult::Evaluated(value) => {
-								// TODO: Next line may not be necessary?
-								self.variables_to_registers.remove(&name);
-								self.evaluated_variables.insert(name, value);
-							}
-						});
-				},
+						(true, _, _) => panic!(),*/
 
 				// Expressions
 
@@ -877,6 +900,40 @@ impl Default for Generator {
 			registers: vec![None],
 			up_values: HashMap::default(),
 			variables_to_registers: HashMap::default()
+		}
+	}
+}
+
+fn iter_tuple<I>(values: I) -> impl FnMut(&mut Generator) -> CompileResult
+		where I: ExactSizeIterator<Item = CompileResult> {
+	enum State<I>
+			where I: ExactSizeIterator<Item = CompileResult> {
+		Values(I),
+		Call {
+			tuple: usize,
+			index: i64,
+			temporary: usize
+		}
+	}
+
+	let mut this = State::Values(values);
+	move |compiler| match &mut this {
+		State::Values(values) => match values.next() {
+			Some(CompileResult::Register(tuple, true)) if values.len() == 0 => {
+				let temporary = compiler.register();
+				this = State::Call {tuple, index: 1, temporary};
+				let index = compiler.compile_known(1);
+				insert_byte_code!(compiler {idxr tuple, index, temporary});
+				CompileResult::Register(temporary, false)
+			},
+			Some(result) => result,
+			None => CompileResult::Register(compiler.register(), false)
+		},
+		&mut State::Call {tuple, ref mut index, temporary} => {
+			*index += 1;
+			let index = compiler.compile_known(*index);
+			insert_byte_code!(compiler {idxr tuple, index, temporary});
+			CompileResult::Register(temporary, false)
 		}
 	}
 }

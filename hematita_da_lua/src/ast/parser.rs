@@ -1,6 +1,7 @@
 use self::super::lexer::Token;
 use itertools::Itertools;
 use std::{
+	convert::{TryFrom, TryInto},
 	error::Error as STDError,
 	fmt::{Display, Formatter, Result as FMTResult},
 	iter::{Peekable, from_fn},
@@ -170,10 +171,10 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 
 				// actor = value
 				actor => {
-					let mut actors = Vec::new();
+					let mut variables = Vec::new();
 					while let Some(Token::Comma) = iter.peek()
-						{iter.eat(); actors.push(parse_expression(iter)?)}
-					let actors = (actor, actors);
+						{iter.eat(); variables.push(parse_expression(iter)?.try_into()?)}
+					let variables = (actor.try_into()?, variables);
 
 					let values = if let Some(Token::Assign) = iter.peek() {
 						iter.eat();
@@ -185,7 +186,7 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 						values
 					} else {Vec::new()};
 
-					statements.push(Statement::Assign {actors, values, local: false})
+					statements.push(Statement::Assign {variables, values})
 				}
 			},
 
@@ -194,11 +195,11 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 				// local actor = value
 				Some(Token::Identifier(_)) => {
 					// TODO: What if it's not an identifier?
-					let actor = Expression::Identifier(iter.identifier());
-					let mut actors = Vec::new();
+					let actor = iter.identifier();
+					let mut variables = Vec::new();
 					while let Some(Token::Comma) = iter.peek()
-						{iter.eat(); actors.push(Expression::Identifier(iter.identifier()))}
-					let actors = (actor, actors);
+						{iter.eat(); variables.push(iter.identifier())}
+					let variables = (actor, variables);
 
 					let values = if let Some(Token::Assign) = iter.peek() {
 						iter.eat();
@@ -210,7 +211,7 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 						values
 					} else {Vec::new()};
 
-					statements.push(Statement::Assign {actors, values, local: true})
+					statements.push(Statement::LocalAssign {variables, values})
 				},
 
 				// local function actor()
@@ -872,18 +873,20 @@ pub enum Statement {
 		values: Vec<Expression>
 	},
 
-	// El assignment
+	// Assignment
 
 	/// An assignment operator.
 	Assign {
 		/// The names of the variables to assign to.
-		actors: (Expression, Vec<Expression>),
+		variables: (AssignmentTarget, Vec<AssignmentTarget>),
 
 		/// The values to assign.
-		values: Vec<Expression>,
+		values: Vec<Expression>
+	},
 
-		/// Whether or not this should be local.
-		local: bool
+	LocalAssign {
+		variables: (String, Vec<String>),
+		values: Vec<Expression>
 	},
 
 	// Expressions
@@ -1105,7 +1108,7 @@ impl Display for Expression {
 
 			Self::Table {array, key_value} => {
 				write!(f, "{{")?;
-				
+
 				let mut first = true;
 				let mut is_first = || {let value = first; first = false; value};
 				array.iter().try_for_each(|value| if is_first() {
@@ -1160,6 +1163,29 @@ impl Display for Expression {
 pub struct ElseIf {
 	pub condition: Expression,
 	pub then: Block
+}
+
+#[derive(Clone, Debug)]
+pub enum AssignmentTarget {
+	Identifier(String),
+	Index {
+		indexee: Expression,
+		index: Expression
+	}
+}
+
+impl TryFrom<Expression> for AssignmentTarget {
+	type Error = Error;
+
+	fn try_from(value: Expression) -> Result<Self> {
+		Ok(match value {
+			Expression::Identifier(identifier) =>
+				Self::Identifier(identifier),
+			Expression::Index {indexee, index} =>
+				Self::Index {indexee: *indexee, index: *index},
+			_ => return Err(Error(None)) // TODO
+		})
+	}
 }
 
 #[derive(Clone, Debug)]
