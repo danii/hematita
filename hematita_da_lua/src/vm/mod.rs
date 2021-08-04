@@ -265,22 +265,10 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 					self.write_reference(destination, NonNil(Value::Table(result)));
 				},
 
-				OpCode::IndexRead {indexee, index, destination, ..} =>
-						match self.reference(indexee) {
-					NonNil(Value::Table(table)) => {
-						// TODO: Metatable
-						let index = match self.reference(index) {
-							NonNil(index) => index,
-							Nil => return Err("table index is nil".to_owned())
-						};
-		
-						let table = table.data.lock().unwrap();
-						self.write_reference(destination,
-							table.get(&index).nillable().cloned());
-					},
-		
-					indexee => break Err(format!("attempt to index a {} value",
-						indexee.type_name()))
+				OpCode::IndexRead {indexee, index, destination} => {
+					let indexee = self.reference(indexee);
+					let index = self.reference(index);
+					self.index_read(indexee, index, destination)?;
 				},
 
 				OpCode::IndexWrite {indexee, index, value} =>
@@ -362,7 +350,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 						result.index(&Value::Integer(1))
 					},
 
-					// Multiply
+					// Divide
 					// TODO: Handle overflow...
 					// TODO: Handle division by zero...
 					(NonNil(Value::Integer(left)), NonNil(Value::Integer(right)),
@@ -584,6 +572,53 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 
 			current_opcode += 1;
 		}
+	}
+
+	fn index_read(&mut self, indexee: NillableValue<Value>,
+			index: NillableValue<Value>, destination: usize) -> Result<(), String> {
+		enum IndexOperation {
+			Value(NillableValue<Value>),
+			NonTable,
+			NilIndex
+		}
+
+		// Triple match FTW
+		match match match (&indexee, &index) {
+			(NonNil(Value::Table(table)), NonNil(index)) => {
+				let data = table.data.lock().unwrap();
+				IndexOperation::Value(data.get(index).nillable().cloned())
+			},
+			(NonNil(Value::Table(_)), Nil) => IndexOperation::NilIndex,
+			_ => IndexOperation::NonTable
+		} {
+			operation @ IndexOperation::NilIndex |
+					operation @ IndexOperation::NonTable |
+					operation @ IndexOperation::Value(Nil) => {
+				match self.meta_method(&indexee, "__index") {
+					// NOTE: Despite possibly being infinitely recursive, this is what
+					// happens in standard.
+					proto @ NonNil(Value::Table(_)) =>
+						return self.index_read(proto, index, destination),
+					function @ NonNil(Value::Function(_)) => {
+						let arguments = Table::array([&indexee, &index]).arc();
+						let result = self.call(function, arguments)?;
+						IndexOperation::Value(result.index(&Value::Integer(1)))
+					},
+					_ => operation
+				}
+			},
+			IndexOperation::Value(NonNil(value)) =>
+				IndexOperation::Value(NonNil(value))
+		} {
+			IndexOperation::Value(value) =>
+				self.write_reference(destination, value.clone()),
+			IndexOperation::NilIndex => return Err(
+				"table index is nil".to_owned()),
+			IndexOperation::NonTable => return Err(
+				format!("attempt to index a {} value", indexee.type_name()))
+		}
+
+		Ok(())
 	}
 }
 
