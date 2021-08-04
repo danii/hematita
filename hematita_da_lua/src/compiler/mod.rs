@@ -314,6 +314,10 @@ impl Generator {
 						self.opcode(OpCode::IndexWrite {indexee: destination, index, value: variable});
 					});
 
+					let zero = self.compile_known(0i64);
+					let count = self.compile_known(values.len() as i64);
+					self.opcode(OpCode::IndexWrite {indexee: destination, index: zero, value: count});
+
 					self.opcode(OpCode::Return {result: destination});
 				},
 
@@ -724,18 +728,55 @@ impl Generator {
 			where T: Iterator<Item = &'i dyn CompileOrCompiled> {
 		let mut indexee = usize::MAX;
 		let mut tuple = tuple.into_iter().peekable();
-		let mut index = 0;
+		let mut index = 0usize;
 
 		loop {
 			match (tuple.next().map(|compileable| compileable.compile(self)),
 					tuple.peek().is_some()) {
-				// If there is only one argument and it's a function call, use it's
-				// return values.
+				// If the last argument is a tuple, and it's the *only* argument, use
+				// it as the tuple.
 				(Some(CompileResult::Register(register, true)), false)
 						if index == 0 => break register,
 
-				(Some(CompileResult::Register(_, true)), false) => {
-					todo!()
+				// If the last argument is a tuple, assign each item from it to the new
+				// tuple.
+				(Some(CompileResult::Register(other, true)), false) => {
+					let mut load = |value| {
+						let constant = self.constants.iter()
+							.position(|constant| constant == &value)
+							.unwrap_or_else(|| {
+								self.constants.push(value);
+								self.constants.len() - 1
+							}) as u16;
+						let register = self.register();
+						self.opcode(OpCode::LoadConst {constant, register});
+						register
+					};
+
+					let index = load(Constant::Integer(index as i64));
+					let other_index = load(Constant::Integer(0i64));
+					let one = load(Constant::Integer(1i64));
+					let zero = load(Constant::Integer(0i64));
+					self.prepare_side_effects();
+
+					let temporary = self.register();
+					let operation = self.opcodes.len() as u64;
+					self.opcode(OpCode::BinaryOperation {left: index, right: one,
+						operation: BinaryOperation::Add, destination: index});
+					self.opcode(OpCode::BinaryOperation {left: other_index, right: one,
+						operation: BinaryOperation::Add, destination: other_index});
+					self.opcode(OpCode::IndexRead
+						{indexee: other, index: other_index, destination: temporary});
+					self.opcode(OpCode::IndexWrite {indexee, index, value: temporary});
+					self.opcode(OpCode::IndexRead
+						{indexee: other, index: zero, destination: temporary});
+					self.opcode(OpCode::BinaryOperation {left: temporary,
+						right: other_index, operation: BinaryOperation::NotEqual,
+							destination: temporary});
+					self.opcode(OpCode::Jump {operation, r#if: Some(temporary)});
+					self.opcode(OpCode::IndexWrite {indexee, index: zero, value: index});
+
+					break indexee
 				},
 
 				(Some(value), _) => {

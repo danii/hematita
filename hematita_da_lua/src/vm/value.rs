@@ -19,10 +19,10 @@ macro_rules! lua_value {
 #[macro_export]
 macro_rules! lua_table {
 	($($arm:tt)*) => {{
-		#[allow(unused_assignments, unused_mut, unused_variables)]
+		#[allow(unused_assignments, unused_mut, unused_variables, unused_imports)]
 		{
 			use std::collections::HashMap;
-			use $crate::{vm::value::{Table, Value}, lua_table_inner};
+			use $crate::{vm::value::{Table, Value}, lua_table_inner, lua_value};
 
 			let mut table = HashMap::<Value, Value>::new();
 			let mut counter = 1;
@@ -59,6 +59,41 @@ macro_rules! lua_table_inner {
 		lua_table_inner!($table $counter {$($($rest)*)?});
 	};
 	($table:ident $counter:ident {$($rest:tt)*}) => {};
+
+	($value:literal) => {lua_value!($value)};
+	($value:expr) => {$value}
+}
+
+#[macro_export]
+macro_rules! lua_tuple {
+	($($arm:tt)*) => {{
+		#[allow(unused_assignments, unused_mut, unused_variables, unused_imports)]
+		{
+			use std::collections::HashMap;
+			use $crate::{vm::value::{Table, Value}, lua_tuple_inner, lua_value};
+
+			let mut table = HashMap::<Value, Value>::new();
+			let mut counter = 0;
+
+			lua_tuple_inner!(table counter {$($arm)*});
+			table.insert(Value::Integer(0), Value::Integer(counter));
+
+			Table::from_hashmap(table)
+		}
+	}}
+}
+
+#[macro_export]
+macro_rules! lua_tuple_inner {
+	($table:ident $counter:ident {$value:expr $(, $($rest:tt)*)?}) => {
+		{
+			$counter += 1;
+			$table.insert(Value::Integer($counter), lua_tuple_inner!($value));
+		}
+
+		lua_tuple_inner!($table $counter {$($($rest)*)?});
+	};
+	($table:ident $counter:ident {}) => {};
 
 	($value:literal) => {lua_value!($value)};
 	($value:expr) => {$value}
@@ -290,6 +325,21 @@ impl<V> NillableValue<V>
 	}
 }
 
+pub trait OptionExt<T>
+		where T: Borrow<Value> {
+	fn flatten(self) -> NillableValue<T>;
+}
+
+impl<T> OptionExt<T> for Option<NillableValue<T>>
+		where T: Borrow<Value> {
+	fn flatten(self) -> NillableValue<T> {
+		match self {
+			Some(value) => value,
+			None => Nil
+		}
+	}
+}
+
 impl<V> Display for NillableValue<V>
 		where V: Borrow<Value> {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
@@ -438,23 +488,24 @@ impl Table {
 		Arc::new(self)
 	}
 
+	/// Inserts a value into this table as if it was an array.
 	#[inline]
-	pub fn array_insert(&self, index: usize, mut value: NillableValue<Value>) {
-		let len = self.len() as usize;
+	pub fn array_insert(&self, index: i64, mut value: NillableValue<Value>) {
+		let len = self.array_len();
 		let mut data = self.data.lock().unwrap();
 
 		(index..=(len.max(1) + 1))
 			.for_each(|index| match take(&mut value) {
 				NonNil(new) =>
-					value = data.insert(Value::Integer(index as i64), new).nillable(),
+					value = data.insert(Value::Integer(index), new).nillable(),
 				Nil =>
-					value = data.remove(&Value::Integer(index as i64)).nillable()
+					value = data.remove(&Value::Integer(index)).nillable()
 			});
 	}
 
 	#[inline]
-	pub fn array_remove(&self, index: usize) -> NillableValue<Value> {
-		let len = self.len() as usize;
+	pub fn array_remove(&self, index: i64) -> NillableValue<Value> {
+		let len = self.array_len();
 		let mut data = self.data.lock().unwrap();
 
 		let mut value = Nil;
@@ -470,16 +521,16 @@ impl Table {
 
 	#[inline]
 	pub fn array_push(&self, value: NillableValue<Value>) {
-		self.array_insert(self.len() as usize, value)
+		self.array_insert(self.array_len(), value)
 	}
 
-	pub fn len(&self) -> i64 {
+	pub fn array_len(&self) -> i64 {
 		self.data.lock().unwrap().iter()
 			.filter_map(|(key, _)| key.integer())
 			.fold(0, |result, index| result.max(index))
 	}
 
-	pub fn is_empty(&self) -> bool {
+	pub fn array_is_empty(&self) -> bool {
 		self.data.lock().unwrap().iter()
 			.any(|(key, _)| key.integer().is_some())
 	}
@@ -487,6 +538,27 @@ impl Table {
 	pub fn index(&self, index: &Value) -> NillableValue<Value> {
 		let data = self.data.lock().unwrap();
 		data.get(index).nillable().cloned()
+	}
+
+	/// Inserts a value into this table as if it was a tuple.
+	#[inline]
+	pub fn tuple_insert(&self, index: i64, mut value: NillableValue<Value>) {
+		let len = self.tuple_len();
+		let mut data = self.data.lock().unwrap();
+		data.insert(Value::Integer(0), Value::Integer(len + 1));
+
+		(index..=(len.max(1) + 1))
+			.for_each(|index| match take(&mut value) {
+				NonNil(new) =>
+					value = data.insert(Value::Integer(index), new).nillable(),
+				Nil =>
+					value = data.remove(&Value::Integer(index)).nillable()
+			});
+	}
+
+	pub fn tuple_len(&self) -> i64 {
+		self.data.lock().unwrap().get(&Value::Integer(0))
+			.unwrap().integer().unwrap()
 	}
 }
 

@@ -1,41 +1,23 @@
+use crate::vm::value::NillableValue;
+
 use self::super::{
 	vm::{
-		value::{IntoNillableValue, NillableValue::NonNil, Table, Value},
+		value::{IntoNillableValue, NillableValue::NonNil, Table, Value, OptionExt},
 		VirtualMachine
 	},
-	lua_table
+	lua_tuple, lua_table
 };
 use itertools::Itertools;
 use std::{collections::HashMap, sync::Arc};
 
-pub fn table_to_vector(table: &Table) -> Vec<Option<Value>> {
+pub fn table_to_vector(table: &Table) -> Vec<NillableValue<Value>> {
 	let table = table.data.lock().unwrap();
-	let array = table.iter()
-		.filter_map(|(key, value)| if let Value::Integer(integer) = key
-			{Some((integer, value))} else {None})
-		.sorted_unstable_by(|(a, _), (b, _)| a.cmp(b));
+	let end = table.get(&Value::Integer(0)).unwrap().integer().unwrap();
 
-	let vec = array.clone().collect::<Vec<_>>();
-	array.last()
-		.map(|(highest, _)| (1..=*highest)
-			.map(|index| vec.iter().find(|value| *value.0 == index)
-				.map(|value| value.1.clone()))
-			.collect::<Vec<_>>())
-		.unwrap_or_else(Vec::new)
-}
-
-/*
-pub fn table_to_vector(table: Table) -> Vec<Value> {
-	table.0.into_inner().unwrap().into_iter()
-		.filter_map(|(key, value)| if let Value::Integer(integer) = key
-			{Some((integer, value))} else {None})
-		.sorted_unstable_by(|(index_a, _), (index_b, _)| index_a.cmp(index_b))
-		.enumerate()
-		.filter_map(|(index, (key, value))| if (key as usize) - 1 == index
-			{Some(value)} else {None})
+	(1..=end)
+		.map(|index| table.get(&Value::Integer(index)).nillable().cloned())
 		.collect()
 }
-*/
 
 pub fn vector_to_table(vector: Vec<Option<Value>>) -> HashMap<Value, Value> {
 	vector.into_iter().enumerate()
@@ -50,7 +32,7 @@ pub fn print(arguments: Arc<Table>, _: &VirtualMachine)
 		.map(|argument| format!("{}", argument.nillable()))
 		.join("\t");
 	println!("{}", message);
-	Ok(lua_table! {}.arc())
+	Ok(lua_tuple![].arc())
 }
 
 pub fn pcall(arguments: Arc<Table>, vm: &VirtualMachine)
@@ -58,17 +40,17 @@ pub fn pcall(arguments: Arc<Table>, vm: &VirtualMachine)
 	Ok(match arguments.array_remove(1) {
 		NonNil(Value::Function(function)) =>
 				match vm.execute(&*function, arguments) {
-			Ok(result) => {result.array_insert(1, true.into()); result},
-			Err(error) => Table::array([&false.into(), &error.into()]).arc()
+			Ok(result) => {result.tuple_insert(1, true.into()); result},
+			Err(error) => lua_tuple![false, error.into()].arc()
 		},
 		NonNil(Value::NativeFunction(function)) => match function(arguments, vm) {
-			Ok(result) => {result.array_insert(1, true.into()); result},
-			Err(error) => Table::array([&false.into(), &error.into()]).arc()
+			Ok(result) => {result.tuple_insert(1, true.into()); result},
+			Err(error) => lua_tuple![false, error.into()].arc()
 		},
-		value => Table::array([
-			&false.into(),
-			&format!("attempt to call a {} value", value.type_name()).into()
-		]).arc()
+		value => lua_tuple![
+			false,
+			format!("attempt to call a {} value", value.type_name()).into()
+		].arc()
 	})
 }
 
@@ -83,12 +65,12 @@ pub fn setmetatable(arguments: Arc<Table>, _: &VirtualMachine)
 		-> Result<Arc<Table>, String> {
 	let arguments = table_to_vector(&arguments);
 	let meta = match arguments.get(1) {
-		Some(Some(Value::Table(meta))) => meta.clone(),
+		Some(NonNil(Value::Table(meta))) => meta.clone(),
 		_ => return Err("metatable error".to_owned())
 	};
 
 	match arguments.get(0) {
-		Some(Some(Value::Table(table))) => {
+		Some(NonNil(Value::Table(table))) => {
 			let mut table = table.metatable.lock().unwrap();
 			*table = Some(meta)
 		},
@@ -102,7 +84,7 @@ pub fn getmetatable(arguments: Arc<Table>, _: &VirtualMachine)
 		-> Result<Arc<Table>, String> {
 	let arguments = table_to_vector(&arguments);
 	Ok(Table::from_hashmap(match arguments.get(0) {
-		Some(Some(Value::Table(table))) =>
+		Some(NonNil(Value::Table(table))) =>
 				match table.metatable.lock().unwrap().clone() {
 			Some(metatable) => {
 				let data = metatable.data.lock().unwrap();
@@ -121,8 +103,7 @@ pub fn r#type(arguments: Arc<Table>, _: &VirtualMachine)
 		-> Result<Arc<Table>, String> {
 	let arguments = table_to_vector(&arguments);
 	let r#type = arguments.get(0).cloned().flatten().nillable().type_name();
-	let result = vec![Some(Value::String(r#type.to_owned().into_boxed_str()))];
-	Ok(Table::from_hashmap(vector_to_table(result)).arc())
+	Ok(lua_tuple![Value::String(r#type.to_owned().into_boxed_str())].arc())
 }
 
 pub fn standard_globals() -> Arc<Table> {

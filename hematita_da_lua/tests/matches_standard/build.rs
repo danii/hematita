@@ -8,7 +8,8 @@ static HEADER: &str = "\
 use hematita_da_lua::{
 	ast::{lexer::Lexer, parser::{TokenIterator, parse_block}},
 	compiler::compile_block, lua_lib::standard_globals,
-	vm::{value::{IntoNillableValue, Table, Value}, VirtualMachine}
+	vm::{value::{IntoNillableValue, Table, Value}, VirtualMachine},
+	lua_tuple
 };
 use itertools::Itertools;
 use std::{process::Command, sync::{Arc, Mutex}};
@@ -16,18 +17,11 @@ use diff::{Result as Diff, lines};
 
 fn table_to_vector(table: &Table) -> Vec<Option<Value>> {
 	let table = table.data.lock().unwrap();
-	let mut array = table.iter()
-		.filter_map(|(key, value)| if let Value::Integer(integer) = key
-			{Some((integer, value))} else {None})
-		.collect::<Vec<_>>();
+	let end = table.get(&Value::Integer(0)).unwrap().integer().unwrap();
 
-	array.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
-	array.last()
-		.map(|(highest, _)| (1..=**highest)
-			.map(|index| array.iter().find(|value| *value.0 == index)
-				.map(|value| value.1.clone()))
-			.collect::<Vec<_>>())
-		.unwrap_or_else(Vec::new)
+	(1..=end)
+		.map(|index| table.get(&Value::Integer(index)).cloned())
+		.collect()
 }
 
 /// Executes [code] using Hematita.
@@ -44,7 +38,7 @@ fn hematita(code: &str) -> String {
 			.join(\"\t\");
 		let mut output = output.lock().unwrap();
 		output.push_str(&message); output.push('\\n');
-		Ok(Table::default().arc())
+		Ok(lua_tuple![].arc())
 	}));
 
 	let globals = {
@@ -56,7 +50,7 @@ fn hematita(code: &str) -> String {
 		globals
 	};
 
-	let arguments = Table::default().arc();
+	let arguments = lua_tuple![].arc();
 	let virtual_machine = VirtualMachine::new(globals);
 	virtual_machine.execute(&function, arguments).unwrap();
 

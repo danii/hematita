@@ -17,7 +17,7 @@ use std::{
 	sync::Arc
 };
 
-macro_rules! binary_relational {
+macro_rules! binary_comparison {
 	($self:ident, $left:ident, $right:ident, $name:ident, $rust_op:tt,
 			$reverse:literal) => {{
 		match ($left, $right) {
@@ -45,6 +45,30 @@ macro_rules! binary_relational {
 			_ => return Err("unknown binary operation error".to_owned())
 		}
 	}}
+}
+
+macro_rules! binary_equality {
+	($self:ident, $left:ident, $right:ident, $rust_op:tt, $invert:literal) => {
+		match ($left, $right) {
+			(Nil, Nil) => NonNil(Value::Boolean(!$invert)),
+			(left @ NonNil(Value::Table(_)), right @ NonNil(Value::Table(_)))
+					if $self.meta_method(&left, "__eq").is_non_nil() => {
+				let meta = $self.meta_method(&left, "__eq");
+				let result = $self.call(meta, Table::array([&left, &right]).arc())?;
+				let result = result.index(&Value::Integer(1)).coerce_to_bool();
+				NonNil(Value::Boolean(result ^ $invert))
+			},
+			(left @ NonNil(Value::Table(_)), right @ NonNil(Value::Table(_)))
+					if $self.meta_method(&right, "__eq").is_non_nil() => {
+				let meta = $self.meta_method(&right, "__eq");
+				let result = $self.call(meta, Table::array([&left, &right]).arc())?;
+				let result = result.index(&Value::Integer(1)).coerce_to_bool();
+				NonNil(Value::Boolean(result ^ $invert))
+			},
+			(left, right) =>
+				NonNil(Value::Boolean(left $rust_op right)),
+		}
+	}
 }
 
 #[derive(Clone, Copy)]
@@ -357,39 +381,28 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 					// Relational
 
 					// Equal
-					(Nil, Nil, BinaryOperation::Equal) => NonNil(Value::Boolean(true)),
-					(left @ NonNil(Value::Table(_)), right @ NonNil(Value::Table(_)),
-							BinaryOperation::Equal) if self.meta_method(&left, "__eq")
-								.is_non_nil() => {
-						let meta = self.meta_method(&left, "__eq");
-						let result = self.call(meta, Table::array([&left, &right]).arc())?;
-						result.index(&Value::Integer(1))
-					},
-					(left @ NonNil(Value::Table(_)), right @ NonNil(Value::Table(_)),
-							BinaryOperation::Equal) if self.meta_method(&right, "__eq")
-								.is_non_nil() => {
-						let meta = self.meta_method(&right, "__eq");
-						let result = self.call(meta, Table::array([&left, &right]).arc())?;
-						result.index(&Value::Integer(1))
-					},
 					(left, right, BinaryOperation::Equal) =>
-						NonNil(Value::Boolean(left == right)),
+						binary_equality!(self, left, right, ==, false),
+
+					// Not Equal
+					(left, right, BinaryOperation::NotEqual) =>
+						binary_equality!(self, left, right, !=, true),
 
 					// Less Than
 					(left, right, BinaryOperation::LessThan) =>
-						binary_relational!(self, left, right, __lt, <, false),
+						binary_comparison!(self, left, right, __lt, <, false),
 
 					// Less Than Or Equal
 					(left, right, BinaryOperation::LessThanOrEqual) =>
-						binary_relational!(self, left, right, __le, <=, false),
+						binary_comparison!(self, left, right, __le, <=, false),
 
 					// Greater Than
 					(left, right, BinaryOperation::GreaterThan) =>
-						binary_relational!(self, left, right, __lt, >, true),
+						binary_comparison!(self, left, right, __lt, >, true),
 
 					// Greater Than Or Equal
 					(left, right, BinaryOperation::GreaterThanOrEqual) =>
-						binary_relational!(self, left, right, __le, >=, true),
+						binary_comparison!(self, left, right, __le, >=, true),
 
 					// Other
 
