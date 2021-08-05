@@ -313,6 +313,14 @@ impl<T> Iterator for Lexer<T> where T: Iterator<Item = char> {
 			_ => self.parse_identifier().unwrap() // Most other literals
 		})
 	}
+
+	/// Returns the bounds on the remaining length of the lexer.
+	///
+	/// There could be as little as zero more tokens, or as many as the number of
+	/// characters in the underlying character iterator.
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		(0, self.source.size_hint().1)
+	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
