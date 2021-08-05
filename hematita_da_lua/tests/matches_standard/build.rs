@@ -1,3 +1,9 @@
+// This file builds integration tests for each file in the lua directory. The
+// test is to check if the execution of a Lua source file in Hematita produces
+// the same standard output as the standard Lua implementation. Files in the
+// lua folder should not produce psuedo-random or random output (e.g. by)
+// printing pointers. 
+
 use std::{path::Path, fs::{File, read_dir}, io::{Error, Write}};
 
 static HEADER: &str = "\

@@ -1,39 +1,166 @@
 use std::iter::Peekable;
 
-/// Tokenizes a lua text file, character by character.
+/// Tokenizes a Lua text file, character by character.
+///
+/// The Lexer wraps some [`Iterator`] of [`char`]s, T, and can be iterated over,
+/// producing [`Token`]s.
+///
+/// Examples
+/// --------
+/// Below is an example of parsing one line of Lua.
+/// ```rust
+/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+/// let mut lexer = Lexer {source: "print('hello world!')".chars().peekable()};
+///
+/// assert_eq!(lexer.next(), Some(Token::Identifier("print".to_owned())));
+/// assert_eq!(lexer.next(), Some(Token::OpenParen));
+/// assert_eq!(lexer.next(), Some(Token::String("hello world!".to_owned())));
+/// assert_eq!(lexer.next(), Some(Token::CloseParen));
+/// assert_eq!(lexer.next(), None);
+/// ```
+///
+/// Future Compatibility Notes
+/// --------------------------
+/// In another breaking release, this will be changed to emit [`Token`]s wrapped
+/// in [`Result`]s instead, as parsing a select few tokens may cause the Lexer
+/// to panic. For more information, please see
+/// [`next`](<Lexer as Iterator>::next).
 pub struct Lexer<T>
 		where T: Iterator<Item = char> {
 	pub source: Peekable<T>
 }
 
+/// The private Lexer API.
+///
+/// Includes many convience methods for internal implementation.
 impl<T> Lexer<T>
 		where T: Iterator<Item = char> {
 	/// Eats a character, disposing of it.
+	///
+	/// Example
+	/// -------
+	/// Below is the typical use case for this function.
+	//  FIXME: https://github.com/rust-lang/rust/issues/67295
+	/// ```ignore
+	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # fn allow_return() -> Result<Token, ()> {
+	/// # 	let mut lexer = Lexer {source: "(".chars().peekable()};
+	/// // The expected type of this match statement is a unit. Calling
+	/// // lexer.next() would do the same thing, but it would conflict with the
+	/// // expected type of the match statement.
+	/// match lexer.peek() {
+	/// 	'(' => lexer.eat(),
+	/// 	_ => return Err(())
+	/// }
+	///
+	/// return Ok(Token::OpenParen)
+	/// # }
+	/// ```
+	#[cfg_attr(test, visibility::make(pub))]
 	fn eat(&mut self) {
 		self.peeked_next();
 	}
 
-	/// Returns the next character, if any.
-	/// Shortcut for accessing source with the same method.
-	pub(in super) fn next(&mut self) -> Option<char> {
+	/// Returns the next character, if any. Shortcut for calling next on
+	/// [`source`](Self::source).
+	///
+	/// Example
+	/// -------
+	/// Below is the typical use case for this function.
+	//  FIXME: https://github.com/rust-lang/rust/issues/67295
+	/// ```ignore
+	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// let mut lexer = Lexer {source: "hello".chars().peekable()};
+	///
+	/// assert_eq!(lexer.next(), Some('h'));
+	/// assert_eq!(lexer.source.next(), Some('e'));
+	/// ```
+	#[must_use = "all characters should be consumed, if you already peeked this, you should use `eat`"]
+	#[cfg_attr(test, visibility::make(pub))]
+	fn next(&mut self) -> Option<char> {
 		self.source.next()
 	}
 
 	/// Returns the next character, assuming that the character was already
 	/// peeked, and did infact, exist.
+	///
+	/// Examples
+	/// --------
+	/// Below is the typical use case for this function.
+	//  FIXME: https://github.com/rust-lang/rust/issues/67295
+	/// ```ignore
+	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use std::mem::drop as consume;
+	/// let mut lexer = Lexer {source: "hi".chars().peekable()};
+	///
+	/// match lexer.peek() {
+	/// 	Some('h') => consume(lexer.peeked_next()),
+	/// 	_ => ()
+	/// }
+	/// ```
+	///
+	/// Below is an example of misuse of this function.
+	//  FIXME: https://github.com/rust-lang/rust/issues/67295
+	/// ```should_panic,ignore
+	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use std::mem::drop as consume;
+	/// let mut lexer = Lexer {source: "".chars().peekable()};
+	///
+	/// match lexer.peek() {
+	/// 	None => consume(lexer.peeked_next()), // PANIC!
+	/// 	_ => ()
+	/// }
+	/// ```
+	#[cfg_attr(test, visibility::make(pub))]
 	fn peeked_next(&mut self) -> char {
-		self.next().unwrap()
+		match self.next() {
+			Some(next) => next,
+			None => unreachable!("called peeked_next when there wasn't anything next")
+		}
 	}
 
-	/// Peeks the next character, if any.
-	/// Shortcut for accessing source with the same method.
-	pub(in super) fn peek(&mut self) -> Option<char> {
+	/// Peeks the next character, if any. Shortcut for calling peek on
+	/// [`source`](Self::source), and then copying the result.
+	///
+	/// Example
+	/// -------
+	/// Below is the typical use case for this function.
+	//  FIXME: https://github.com/rust-lang/rust/issues/67295
+	/// ```ignore
+	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// let mut lexer = Lexer {source: "hello".chars().peekable()};
+	///
+	/// assert_eq!(lexer.peek(), Some('h'));
+	/// assert_eq!(lexer.source.peek(), Some(&'h'));
+	/// assert_eq!(lexer.next(), Some('h'));
+	/// assert_eq!(lexer.peek(), Some('e'));
+	/// ```
+	#[cfg_attr(test, visibility::make(pub))]
+	fn peek(&mut self) -> Option<char> {
 		self.source.peek().map(Clone::clone)
 	}
 
-	/// Parses through whitespace and comments, discarding it all, and returns
-	/// the last peeked non whitespace character.
-	pub(in super) fn parse_whitespace(&mut self) -> Option<char> {
+	/// Parses and discards all whitespace, and returns the last peeked non
+	/// whitespace character.
+	///
+	/// Example
+	/// -------
+	/// Below is the typical use case for this function.
+	//  FIXME: https://github.com/rust-lang/rust/issues/67295
+	/// ```ignore
+	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// let mut lexer = Lexer {source: "a b    cd".chars().peekable()};
+	///
+	/// assert_eq!(iter.parse_whitespace(), Some('a'));
+	/// iter.eat();
+	/// assert_eq!(iter.parse_whitespace(), Some('b'));
+	/// iter.eat();
+	/// assert_eq!(iter.parse_whitespace(), Some('c'));
+	/// iter.eat();
+	/// assert_eq!(iter.parse_whitespace(), Some('d'));
+	/// ```
+	#[cfg_attr(test, visibility::make(pub))]
+	fn parse_whitespace(&mut self) -> Option<char> {
 		loop {
 			match self.peek()? {
 				' ' | '\n' | '\t' => self.eat(),
@@ -43,6 +170,26 @@ impl<T> Lexer<T>
 	}
 
 	/// Parses an identifier into a token.
+	///
+	/// Example
+	/// -------
+	/// Below is the typical use case for this function.
+	//  FIXME: https://github.com/rust-lang/rust/issues/67295
+	/// ```ignore
+	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// let mut lexer = Lexer {source: "hi if end ok".chars().peekable()};
+	///
+	/// assert_eq!(lexer.parse_identifier(),
+	/// 	Some(Token::Identifier("hi".to_string())));
+	/// lexer.parse_whitespace();
+	/// assert_eq!(lexer.parse_identifier(), Some(Token::KeywordIf));
+	/// lexer.parse_whitespace();
+	/// assert_eq!(lexer.parse_identifier(), Some(Token::KeywordEnd));
+	/// lexer.parse_whitespace();
+	/// assert_eq!(lexer.parse_identifier(),
+	/// 	Some(Token::Identifier("ok".to_string())));
+	/// ```
+	#[cfg_attr(test, visibility::make(pub))]
 	fn parse_identifier(&mut self) -> Option<Token> {
 		let mut identifier = String::new();
 
@@ -76,7 +223,28 @@ impl<T> Lexer<T>
 		})
 	}
 
-	/// Parses a string. Assumes the first quote character was not consumed.
+	/// Parses a string into a token. Assumes the first quote character *was not*
+	/// consumed.
+	///
+	/// Example
+	/// -------
+	/// Below is the typical use case for this function.
+	//  FIXME: https://github.com/rust-lang/rust/issues/67295
+	/// ```ignore
+	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// let mut lexer = Lexer {source: "'hi\\n'".chars().peekable()};
+	///
+	/// assert_eq!(lexer.parse_string(),
+	/// 	Some(Token::String("hi\n".to_owned())));
+	/// ```
+	///
+	/// Future Compatibility Notes
+	/// --------------------------
+	/// As of current, this function may panic if an incorrect escape sequence is
+	/// used. In the future, this will be mitigated by changing the return type of
+	/// this function from an [`Option`]`<`[`Token`]`>` to a
+	/// [`Result`]`<`[`Token`]`, E>`, where the type of `E` is still up to debate.
+	#[cfg_attr(test, visibility::make(pub))]
 	fn parse_string(&mut self) -> Option<Token> {
 		let delimiter = self.peeked_next();
 		let mut string = String::new();
@@ -105,37 +273,70 @@ impl<T> Lexer<T>
 		}
 	}
 
-	/// Parses a string. Assumes the first character was a [, and was consumed.
+	/// Parses a bracketed string into a token. Assumes the first character was a
+	/// `[`, and *was* consumed.
+	///
+	/// Example
+	/// -------
+	//  FIXME: https://github.com/rust-lang/rust/issues/67295
+	/// ```ignore
+	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// let mut lexer = Lexer {source: "[[hi\\n]]".chars().peekable()};
+	///
+	/// assert_eq!(lexer.next(), Some('['));
+	/// assert_eq!(lexer.parse_bracketed_string(),
+	/// 	Some(Some(Token::String("hi\\n".to_owned()))));
+	/// ```
+	#[cfg_attr(test, visibility::make(pub))]
 	fn parse_bracketed_string(&mut self) -> Option<Token> {
 		self.parse_bracketed().map(Token::String)
 	}
 
-	/// Parses a number, or, potentially, the subtraction operator.
+	/// Parses a number into a token. Assumes the first character *was not*
+	/// consumed.
+	///
+	/// Example
+	/// -------
+	//  FIXME: https://github.com/rust-lang/rust/issues/67295
+	/// ```ignore
+	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// let mut lexer = Lexer {source: "123".chars().peekable()};
+	///
+	/// assert_eq!(lexer.parse_number(), Some(Token::Integer(123)));
+	/// ```
+	///
+	/// Future Compatibility Notes
+	/// --------------------------
+	/// As of current, this function may panic if the number overflows an [`i64`].
+	/// In the future, this will be mitigated by, (hopefully first introducing
+	/// [`f64`]s into the interpreter, and), changing the return type of this
+	/// function from an [`Option`]`<`[`Token`]`>` into a
+	/// [`Result`]`<`[`Token`]`, E>`, where the type of `E` is still up to debate.
+	#[cfg_attr(test, visibility::make(pub))]
 	fn parse_number(&mut self) -> Option<Token> {
 		let mut number = String::new();
-		
-		loop {
-			match self.peek() {
-				// TODO: - is impossible now.
-				Some('-') => if number.is_empty() {
-					number.push(self.peeked_next())
-				} else {
-					todo!()
-				},
-				Some('0'..='9') => number.push(self.peeked_next()),
-				_ => break
-			}
-		}
-
-		Some(if number == "-" {
-			Token::Minus
-		} else {
-			// TODO: Handle unwrap!
-			Token::Integer(number.parse().unwrap())
-		})
+		while let Some('0'..='9') = self.peek()
+			{number.push(self.peeked_next())}
+		// TODO: Handle unwrap!
+		Some(Token::Integer(number.parse().unwrap()))
 	}
 
-	/// Parses a comment. Assumes the first characters were --, and were consumed.
+	/// Parses a comment into a token. Assumes the first characters were `--`,
+	/// and *were* consumed.
+	///
+	/// Example
+	/// -------
+	//  FIXME: https://github.com/rust-lang/rust/issues/67295
+	/// ```ignore
+	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// let mut lexer = Lexer {source: "-- comment!".chars().peekable()};
+	///
+	/// assert_eq!(lexer.next(), Some('-'));
+	/// assert_eq!(lexer.next(), Some('-'));
+	/// assert_eq!(lexer.parse_comment(),
+	/// 	Some(Token::Comment(" comment!".to_owned())));
+	/// ```
+	#[cfg_attr(test, visibility::make(pub))]
 	fn parse_comment(&mut self) -> Option<Token> {
 		match self.peek()? {
 			'[' => self.parse_bracketed().map(Token::Comment),
@@ -151,8 +352,16 @@ impl<T> Lexer<T>
 		}
 	}
 
-	/// Parses some bracketed item. Assumes the first character was a [, and was
-	/// consumed.
+	/// Parses some bracketed item. Assumes the first character was a `[`, and
+	/// *was* consumed.
+	///
+	/// This is internally used by both [`parse_bracketed_string`][string] and
+	/// [`parse_comment`][comment]. For an example, see `parse_bracketed_string`'s
+	/// examples.
+	///
+	/// [string]: Self::parse_bracketed_string
+	/// [comment]: Self::parse_comment
+	#[cfg_attr(test, visibility::make(pub))]
 	fn parse_bracketed(&mut self) -> Option<String> {
 		let mut string = String::new();
 		let length = {
@@ -204,9 +413,16 @@ impl<T> Lexer<T>
 	}
 }
 
-impl<T> Iterator for Lexer<T> where T: Iterator<Item = char> {
+/// The main interface to the Lexer.
+impl<T> Iterator for Lexer<T>
+		where T: Iterator<Item = char> {
 	type Item = Token;
 
+	/// Parses a single token and returns it.
+	///
+	/// After all tokens have been parsed and the underlying character iterator
+	/// is exhausted, *or* an error occurs, this will return `None` from
+	/// thenforth.
 	fn next(&mut self) -> Option<Token> {
 		Some(match self.parse_whitespace()? {
 			// TODO: Error handling on complex cases.
@@ -323,81 +539,235 @@ impl<T> Iterator for Lexer<T> where T: Iterator<Item = char> {
 	}
 }
 
+/// A single syntactical unit of Lua code.
+///
+/// Represents identifiers, punctuation, and everythign in between.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Token {
 	// Comment
+
+	/// A Lua comment. May or may not include new lines.
+	///
+	/// Example
+	/// -------
+	/// ```lua
+	/// -- Hello world!
+	/// --[[
+	/// 	I am a multiline comment,
+	/// 	and you are a cutie.
+	/// ]]
+	/// ```
 	Comment(String),
 
 	// Literals
+
+	/// An identifier, excluding keywords.
+	///
+	/// Example
+	/// -------
+	/// Valid Identifiers
+	/// - `whatLanguageDo`
+	/// - `you_like_better`
+	/// - `__luaOr_rust12345`
+	///
+	/// Invalid Identifiers
+	/// - `69imMatureIPromise` - Cannot start with a digit
+	/// - `what_am!i_supposed` - Includes a non word character
+	/// - `toWriteHere我不知道` - Includes non latin characters
 	Identifier(String),
+
+	/// An integer.
 	Integer(i64),
+
+	/// A string.
+	///
+	/// Example
+	/// -------
+	/// Valid Strings
+	/// - `"\tPerhaps, I should reference a song?\n"`
+	/// - `'All my life I\'ve drowned in adrenaline\nNow my blood runs slow like a
+	/// 	seditive'`
+	/// - `[[Good song? No? Damn. :( \t\y\e\x\\stuff\vr"""')]]`
+	/// - `[===[[[ ]]  ]=====] OH BTW THOSE LYRICS ARE NOT LICENSED]===]`
+	///
+	/// Invalid Strings
+	/// - `"I could just write what the error is in here'` - Mismatched quotation
+	/// - `'but instead i choose to write this \y'` - Invalid escape sequence
+	/// - `[===[everybody asks what the coder doin`<br>
+	/// 	`but nobody asks how is the coder doin]]` - Mismatched braces
 	String(String),
 
 	// Literal Values
+
+	/// The `true` keyword.
 	LiteralTrue,
+
+	/// The `false` keyword.
 	LiteralFalse,
+
+	/// The `nil` keyword.
 	LiteralNil,
 
 	// Arithmetic
+
+	/// The `+` symbol.
 	Add,
+
+	/// The `-` symbol.
 	Minus,
+
+	/// The `*` symbol.
 	Multiply,
+
+	/// The `/` symbol.
 	Divide,
+
+	/// The `//` symbol.
 	FloorDivide,
+
+	/// The `%` symbol.
 	Modulo,
+
+	/// The `^` symbol.
 	Exponent,
 
 	// Bitwise
+
+	/// The `&` symbol.
 	BitwiseAnd,
+
+	/// The `|` symbol.
 	BitwiseOr,
+
+	/// The `~` symbol.
 	BitwiseNotOrXOr,
+
+	/// The `<<` symbol.
 	ShiftLeft,
+
+	/// The `>>` symbol.
 	ShiftRight,
 
 	// Relational
+
+	/// The `==` symbol.
 	Equal,
+
+	/// The `~=` symbol.
 	NotEqual,
+
+	/// The `<` symbol.
 	LessThan,
+
+	/// The `<=` symbol.
 	LessThanOrEqual,
+
+	/// The `>` symbol.
 	GreaterThan,
+
+	/// The `>=` symbol.
 	GreaterThanOrEqual,
 
 	// Other
+
+	/// The `=` symbol.
 	Assign,
+
+	/// The `:` symbol.
 	Colon,
+
+	/// The `,` symbol.
 	Comma,
+
+	/// The `.` symbol.
 	Period,
+
+	/// The `;` symbol.
 	SemiColon,
+
+	/// The `..` symbol.
 	Concat,
+
+	/// The `#` symbol.
 	Length,
 
 	// Sectioning
+
+	/// The `(` symbol.
 	OpenParen,
+
+	/// The `)` symbol.
 	CloseParen,
+
+	/// The `{` symbol.
 	OpenCurly,
+
+	/// The `}` symbol.
 	CloseCurly,
+
+	/// The `[` symbol.
 	OpenBracket,
+
+	/// The `]` symbol.
 	CloseBracket,
 
 	// Keywords
+
+	/// The `and` keyword.
 	KeywordAnd,
+
+	/// The `break` keyword.
 	KeywordBreak,
+
+	/// The `do` keyword.
 	KeywordDo,
+
+	/// The `else` keyword.
 	KeywordElse,
+
+	/// The `elseif` keyword.
 	KeywordElseIf,
+
+	/// The `end` keyword.
 	KeywordEnd,
+
+	/// The `for` keyword.
 	KeywordFor,
+
+	/// The `function` keyword.
 	KeywordFunction,
+
+	/// The `goto` keyword.
 	KeywordGoto,
+
+	/// The `if` keyword.
 	KeywordIf,
+
+	/// The `in` keyword.
 	KeywordIn,
+
+	/// The `local` keyword.
 	KeywordLocal,
+
+	/// The `not` keyword.
 	KeywordNot,
+
+	/// The `or` keyword.
 	KeywordOr,
+
+	/// The `repeat` keyword.
 	KeywordRepeat,
+
+	/// The `return` keyword.
 	KeywordReturn,
+
+	/// The `then` keyword.
 	KeywordThen,
+
+	/// The `until` keyword.
 	KeywordUntil,
+
+	/// The `while` keyword.
 	KeywordWhile
 }
 

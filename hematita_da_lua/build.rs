@@ -1,3 +1,5 @@
+//! This file mainly just runs different build scripts for integration tests.
+
 use self::tests::matches_standard;
 
 pub mod tests {
