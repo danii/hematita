@@ -2,7 +2,7 @@ use self::super::{compile, compile_expression, handle_io};
 use hematita_da_lua::{
 	ast::parser::Error,
 	lua_lib::print,
-	vm::{VirtualMachine, value::{NillableValue::{Nil, NonNil}, Table, Value}}
+	vm::{VirtualMachine, value::{Nillable::{Nil, NonNil}, Table, Value}}
 };
 use std::io::{BufRead, Write, stdin, stdout};
 

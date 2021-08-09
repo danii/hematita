@@ -4,10 +4,13 @@ pub mod value;
 pub mod tests;
 
 use self::{
-	super::ast::parser::{BinaryOperator, UnaryOperator},
+	super::{
+		lua_tuple,
+		ast::parser::{BinaryOperator, UnaryOperator}
+	},
 	constant::Constant,
 	value::{
-		Function, IntoNillableValue, MaybeUpValue, NillableValue, Nil, NonNil,
+		Function, IntoNillable, MaybeUpValue, Nillable, Nil, NonNil,
 		Table, Value
 	}
 };
@@ -32,15 +35,17 @@ macro_rules! binary_comparison {
 			(left, right)
 					if $self.meta_method(&left, stringify!($name)).is_non_nil() => {
 				let meta = $self.meta_method(&left, stringify!($name));
-				let arguments = if $reverse {[&right, &left]} else {[&left, &right]};
-				let result = $self.call(meta, Table::array(arguments).arc())?;
+				let arguments = if $reverse {lua_tuple![right, left]}
+					else {lua_tuple![left, right]};
+				let result = $self.call(meta, arguments.arc())?;
 				NonNil(result.index(&Value::Integer(1)).coerce_to_boolean())
 			},
 			(left, right)
 					if $self.meta_method(&right, stringify!($name)).is_non_nil() => {
 				let meta = $self.meta_method(&left, stringify!($name));
-				let arguments = if $reverse {[&right, &left]} else {[&left, &right]};
-				let result = $self.call(meta, Table::array(arguments).arc())?;
+				let arguments = if $reverse {lua_tuple![right, left]}
+					else {lua_tuple![left, right]};
+				let result = $self.call(meta, arguments.arc())?;
 				NonNil(result.index(&Value::Integer(1)).coerce_to_boolean())
 			},
 
@@ -56,14 +61,14 @@ macro_rules! binary_equality {
 			(left @ NonNil(Value::Table(_)), right @ NonNil(Value::Table(_)))
 					if $self.meta_method(&left, "__eq").is_non_nil() => {
 				let meta = $self.meta_method(&left, "__eq");
-				let result = $self.call(meta, Table::array([&left, &right]).arc())?;
+				let result = $self.call(meta, lua_tuple![left, right].arc())?;
 				let result = result.index(&Value::Integer(1)).coerce_to_bool();
 				NonNil(Value::Boolean(result ^ $invert))
 			},
 			(left @ NonNil(Value::Table(_)), right @ NonNil(Value::Table(_)))
 					if $self.meta_method(&right, "__eq").is_non_nil() => {
 				let meta = $self.meta_method(&right, "__eq");
-				let result = $self.call(meta, Table::array([&left, &right]).arc())?;
+				let result = $self.call(meta, lua_tuple![left, right].arc())?;
 				let result = result.index(&Value::Integer(1)).coerce_to_bool();
 				NonNil(Value::Boolean(result ^ $invert))
 			},
@@ -129,11 +134,11 @@ struct StackFrame<'v, 'f> {
 
 impl<'v, 'f> StackFrame<'v, 'f> {
 	fn reference<'s>(&self, reference: impl Into<Reference<'s>>)
-			-> NillableValue<Value> {
+			-> Nillable {
 		match reference.into() {
 			Reference::Global(name) => {
 				let global = self.virtual_machine.global.data.lock().unwrap();
-				global.get(&Value::new_string(name)).nillable().cloned()
+				global.get(&Value::new_string(name)).nillable()
 			},
 			Reference::Local(id) => match &self.registers[id] {
 				MaybeUpValue::Normal(value) => value.clone(),
@@ -143,7 +148,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 	}
 
 	fn write_reference<'s>(&mut self, reference: impl Into<Reference<'s>>,
-			value: NillableValue<Value>) {
+			value: Nillable) {
 		match reference.into() {
 			Reference::Global(name) => {
 				let mut global = self.virtual_machine.global.data.lock().unwrap();
@@ -162,8 +167,8 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 		}
 	}
 
-	fn meta_method(&self, object: &NillableValue<Value>, method: &str)
-			-> NillableValue<Value> {
+	fn meta_method(&self, object: &Nillable, method: &str)
+			-> Nillable {
 		match object {
 			NonNil(Value::Integer(_)) => {
 				let meta = match self.virtual_machine.number_meta.as_ref() {
@@ -172,7 +177,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 				};
 
 				let meta = meta.data.lock().unwrap();
-				meta.get(&Value::new_string(method)).nillable().cloned()
+				meta.get(&Value::new_string(method)).nillable()
 			},
 			NonNil(Value::String(_)) => {
 				let meta = match self.virtual_machine.string_meta.as_ref() {
@@ -181,7 +186,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 				};
 
 				let meta = meta.data.lock().unwrap();
-				meta.get(&Value::new_string(method)).nillable().cloned()
+				meta.get(&Value::new_string(method)).nillable()
 			},
 			NonNil(Value::Boolean(_)) => {
 				let meta = match self.virtual_machine.boolean_meta.as_ref() {
@@ -190,7 +195,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 				};
 
 				let meta = meta.data.lock().unwrap();
-				meta.get(&Value::new_string(method)).nillable().cloned()
+				meta.get(&Value::new_string(method)).nillable()
 			},
 			NonNil(Value::Function(_)) | NonNil(Value::NativeFunction(_)) => {
 				let meta = match self.virtual_machine.function_meta.as_ref() {
@@ -199,19 +204,19 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 				};
 
 				let meta = meta.data.lock().unwrap();
-				meta.get(&Value::new_string(method)).nillable().cloned()
+				meta.get(&Value::new_string(method)).nillable()
 			},
 			NonNil(Value::Table(table)) => match &*table.metatable.lock().unwrap() {
 				Some(meta) => {
 					let meta = meta.data.lock().unwrap();
-					meta.get(&Value::new_string(method)).nillable().cloned()
+					meta.get(&Value::new_string(method)).nillable()
 				},
 				None => Nil
 			},
 			NonNil(Value::UserData {meta, ..}) => match meta {
 				Some(meta) => {
 					let meta = meta.data.lock().unwrap();
-					meta.get(&Value::new_string(method)).nillable().cloned()
+					meta.get(&Value::new_string(method)).nillable()
 				},
 				None => Nil
 			},
@@ -219,7 +224,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 		}
 	}
 
-	fn call(&self, function: NillableValue<Value>, arguments: Arc<Table>)
+	fn call(&self, function: Nillable, arguments: Arc<Table>)
 			-> Result<Arc<Table>, String> {
 		match function {
 			NonNil(Value::Function(function)) =>
@@ -229,20 +234,9 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 			// NOTE: While this can cause unbounded recursion, this is actually what
 			// happens in the main implementation.
 			function if self.meta_method(&function, "__call").is_non_nil() => {
-				let arguments = arguments.data.lock().unwrap();
-				let mut arguments = arguments.iter()
-					.map(|(key, value)| match key {
-						Value::Integer(index) => (Value::Integer(index + 1), value.clone()),
-						key => (key.clone(), value.clone())
-					}).collect::<HashMap<_, _>>();
-				match &function {
-					NonNil(function) => arguments.insert(
-						Value::Integer(1), function.clone()),
-					Nil => arguments.remove(&Value::Integer(1))
-				};
-
+				arguments.tuple_insert(1, function.clone());
 				let function = self.meta_method(&function, "__call");
-				self.call(function, Table::from_hashmap(arguments).arc())
+				self.call(function, arguments)
 			},
 			function => Err(format!("attempt to call a {} value",
 				function.type_name()))
@@ -313,13 +307,13 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 					(left, right, BinaryOperation::Add)
 							if self.meta_method(&left, "__add").is_non_nil() => {
 						let meta = self.meta_method(&left, "__add");
-						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						let result = self.call(meta, lua_tuple![left, right].arc())?;
 						result.index(&Value::Integer(1))
 					},
 					(left, right, BinaryOperation::Add)
 							if self.meta_method(&right, "__add").is_non_nil() => {
 						let meta = self.meta_method(&right, "__add");
-						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						let result = self.call(meta, lua_tuple![left, right].arc())?;
 						result.index(&Value::Integer(1))
 					},
 
@@ -330,13 +324,13 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 					(left, right, BinaryOperation::Subtract)
 							if self.meta_method(&left, "__sub").is_non_nil() => {
 						let meta = self.meta_method(&left, "__sub");
-						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						let result = self.call(meta, lua_tuple![left, right].arc())?;
 						result.index(&Value::Integer(1))
 					},
 					(left, right, BinaryOperation::Subtract)
 							if self.meta_method(&right, "__sub").is_non_nil() => {
 						let meta = self.meta_method(&right, "__sub");
-						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						let result = self.call(meta, lua_tuple![left, right].arc())?;
 						result.index(&Value::Integer(1))
 					},
 
@@ -347,13 +341,13 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 					(left, right, BinaryOperation::Multiply)
 							if self.meta_method(&left, "__mul").is_non_nil() => {
 						let meta = self.meta_method(&left, "__mul");
-						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						let result = self.call(meta, lua_tuple![left, right].arc())?;
 						result.index(&Value::Integer(1))
 					},
 					(left, right, BinaryOperation::Multiply)
 							if self.meta_method(&right, "__mul").is_non_nil() => {
 						let meta = self.meta_method(&right, "__mul");
-						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						let result = self.call(meta, lua_tuple![left, right].arc())?;
 						result.index(&Value::Integer(1))
 					},
 
@@ -365,13 +359,13 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 					(left, right, BinaryOperation::Divide)
 							if self.meta_method(&left, "__div").is_non_nil() => {
 						let meta = self.meta_method(&left, "__div");
-						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						let result = self.call(meta, lua_tuple![left, right].arc())?;
 						result.index(&Value::Integer(1))
 					},
 					(left, right, BinaryOperation::Divide)
 							if self.meta_method(&right, "__div").is_non_nil() => {
 						let meta = self.meta_method(&right, "__div");
-						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						let result = self.call(meta, lua_tuple![left, right].arc())?;
 						result.index(&Value::Integer(1))
 					},
 
@@ -419,13 +413,13 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 					(left, right, BinaryOperation::Concat)
 							if self.meta_method(&left, "__concat").is_non_nil() => {
 						let meta = self.meta_method(&left, "__concat");
-						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						let result = self.call(meta, lua_tuple![left, right].arc())?;
 						result.index(&Value::Integer(1))
 					},
 					(left, right, BinaryOperation::Concat)
 							if self.meta_method(&right, "__concat").is_non_nil() => {
 						let meta = self.meta_method(&right, "__concat");
-						let result = self.call(meta, Table::array([&left, &right]).arc())?;
+						let result = self.call(meta, lua_tuple![left, right].arc())?;
 						result.index(&Value::Integer(1))
 					},
 
@@ -446,8 +440,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 					(operand, UnaryOperation::Negate)
 							if self.meta_method(&operand, "__unm").is_non_nil() => {
 						let meta = self.meta_method(&operand, "__unm");
-						let result = self.call(meta,
-							Table::array([&operand, &operand]).arc())?;
+						let result = self.call(meta, lua_tuple![&operand, operand].arc())?;
 						result.index(&Value::Integer(1))
 					},
 					(operand, UnaryOperation::Negate) =>
@@ -469,8 +462,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 					(operand, UnaryOperation::Length)
 							if self.meta_method(&operand, "__len").is_non_nil() => {
 						let meta = self.meta_method(&operand, "__len");
-						let result = self.call(meta,
-							Table::array([&operand, &operand]).arc())?;
+						let result = self.call(meta, lua_tuple![&operand, &operand].arc())?;
 						result.index(&Value::Integer(1))
 					},
 					(NonNil(Value::Table(operand)), UnaryOperation::Length) => {
@@ -581,10 +573,10 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 		}
 	}
 
-	fn index_read(&mut self, indexee: NillableValue<Value>,
-			index: NillableValue<Value>, destination: usize) -> Result<(), String> {
+	fn index_read(&mut self, indexee: Nillable,
+			index: Nillable, destination: usize) -> Result<(), String> {
 		enum IndexOperation {
-			Value(NillableValue<Value>),
+			Value(Nillable),
 			NonTable,
 			NilIndex
 		}
@@ -593,7 +585,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 		match match match (&indexee, &index) {
 			(NonNil(Value::Table(table)), NonNil(index)) => {
 				let data = table.data.lock().unwrap();
-				IndexOperation::Value(data.get(index).nillable().cloned())
+				IndexOperation::Value(data.get(index).nillable())
 			},
 			(NonNil(Value::Table(_)), Nil) => IndexOperation::NilIndex,
 			_ => IndexOperation::NonTable
@@ -607,7 +599,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 					proto @ NonNil(Value::Table(_)) =>
 						return self.index_read(proto, index, destination),
 					function @ NonNil(Value::Function(_)) => {
-						let arguments = Table::array([&indexee, &index]).arc();
+						let arguments = lua_tuple![&indexee, index].arc();
 						let result = self.call(function, arguments)?;
 						IndexOperation::Value(result.index(&Value::Integer(1)))
 					},

@@ -52,7 +52,7 @@
 //! // Running the bytecode is slightly more involved, as we have to prepare a
 //! // global scope for the virtual machine, and arguments for our code. It's
 //! // not that hard though.
-//! let global = lua_lib::standard_globals().arc();
+//! let global = lua_lib::standard_globals();
 //! let arguments = vm::value::Table::default().arc();
 //! // Create the virtual machine...
 //! let virtual_machine = vm::VirtualMachine::new(global);
