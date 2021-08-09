@@ -99,6 +99,10 @@ macro_rules! lua_tuple_inner {
 	($value:expr) => {$value}
 }
 
+pub trait UserData {
+	fn type_name(&self) -> &'static str;
+}
+
 pub type NativeFunction<'r> = &'r dyn Fn(Arc<Table>, &VirtualMachine)
 	-> Result<Arc<Table>, String>;
 
@@ -110,6 +114,10 @@ pub enum Value {
 	String(Box<str>),
 	Boolean(bool),
 	Table(Arc<Table>),
+	UserData {
+		data: &'static dyn UserData,
+		meta: Option<Arc<Table>>
+	},
 	Function(Arc<Function>),
 	NativeFunction(NativeFunction<'static>)
 }
@@ -125,6 +133,7 @@ impl Value {
 			Self::String(_) => "string",
 			Self::Boolean(_) => "boolean",
 			Self::Table(_) => "table",
+			Self::UserData {data, ..} => data.type_name(),
 			Self::Function(_) | Self::NativeFunction(_) => "function"
 		}
 	}
@@ -187,6 +196,7 @@ impl Display for Value {
 			Self::String(string) => write!(f, "{}", string),
 			Self::Boolean(boolean) => write!(f, "{}", boolean),
 			Self::Table(table) => write!(f, "{}", table),
+			Self::UserData {..} => todo!(),
 			Self::Function(function) => write!(f, "{}", function),
 			Self::NativeFunction(function) => write!(f, "function: {:p}", *function)
 		}
@@ -200,6 +210,7 @@ impl Debug for Value {
 			Self::String(string) => Debug::fmt(string, f),
 			Self::Boolean(boolean) => Debug::fmt(boolean, f),
 			Self::Table(table) => Debug::fmt(table, f),
+			Self::UserData {..} => todo!(),
 			Self::Function(function) => Debug::fmt(function, f),
 			Self::NativeFunction(function) => write!(f, "function: {:p}", function)
 		}
@@ -232,8 +243,9 @@ impl Hash for Value {
 			Self::Integer(integer) => integer.hash(state),
 			Self::String(string) => string.hash(state),
 			Self::Boolean(boolean) => boolean.hash(state),
-			Self::Function(arc) => Arc::as_ptr(arc).hash(state),
 			Self::Table(arc) => Arc::as_ptr(arc).hash(state),
+			Self::UserData {data, ..} => hash(data, state),
+			Self::Function(arc) => Arc::as_ptr(arc).hash(state),
 			Self::NativeFunction(func) => hash(func, state)
 		}
 	}

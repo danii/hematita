@@ -208,7 +208,14 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 				},
 				None => Nil
 			},
-			_ => Nil
+			NonNil(Value::UserData {meta, ..}) => match meta {
+				Some(meta) => {
+					let meta = meta.data.lock().unwrap();
+					meta.get(&Value::new_string(method)).nillable().cloned()
+				},
+				None => Nil
+			},
+			Nil => Nil
 		}
 	}
 
