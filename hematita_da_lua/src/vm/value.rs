@@ -1,21 +1,14 @@
 pub use self::{super::{Chunk, VirtualMachine}, Nillable::{Nil, NonNil}};
-use std::{
-	borrow::Borrow,
-	collections::HashMap,
-	fmt::{Debug, Display, Formatter, Result as FMTResult},
-	hash::{Hash, Hasher},
-	mem::take,
-	ptr::{eq, hash},
-	sync::{Arc, Mutex}
-};
+use hashbrown::HashMap;
+use std::{borrow::Borrow, fmt::{Debug, Display, Formatter, Result as FMTResult}, hash::{BuildHasher, Hash, Hasher}, mem::take, ptr::{eq, hash}, sync::{Arc, Mutex}};
 
 macro_rules! value_conversions {
 	(
-		impl$(<$($param:tt),*>)? for $convert:ident @ $for:ty $code:block
+		impl<$lf:tt $(; $($param:tt),*)?> for $convert:ident @ $for:ty $code:block
 		$($rest:tt)*
 	) => {
-		impl$(<$($param),*>)? From<$for> for Value {
-			fn from($convert: $for) -> Value {
+		impl<$lf $(, $($param),*)?> From<$for> for Value<$lf> {
+			fn from($convert: $for) -> Value<$lf> {
 				$code
 			}
 		}
@@ -27,18 +20,18 @@ macro_rules! value_conversions {
 
 macro_rules! nillable_conversions {
 	(
-		impl$(<$($param:tt),*>)? all
+		impl<$lf:tt $(; $($param:tt),*)?> all
 		for $convert:ident @ $for:ty $code:block $($rest:tt)*
 	) => {
-		impl$(<$($param),*>)? IntoNillable for $for {
+		impl<$lf $(, $($param),*)?> IntoNillable<$lf> for $for {
 			#[inline]
-			fn nillable(self) -> Nillable {
+			fn nillable(self) -> Nillable<$lf> {
 				let $convert = self;
 				$code
 			}
 		}
 
-		impl$(<$($param),*>)? From<$for> for Nillable {
+		impl<$lf $(, $($param),*)?> From<$for> for Nillable<$lf> {
 			#[inline]
 			fn from($convert: $for) -> Self {
 				$code
@@ -48,12 +41,12 @@ macro_rules! nillable_conversions {
 		nillable_conversions! {$($rest)*}
 	};
 	(
-		impl$(<$($param:tt),*>)?
+		impl<$lf:tt $(; $($param:tt),*)?>
 		for $convert:ident @ $for:ty $code:block $($rest:tt)*
 	) => {
-		impl$(<$($param),*>)? IntoNillable for $for {
+		impl<$lf $(, $($param),*)?> IntoNillable<$lf> for $for {
 			#[inline]
-			fn nillable(self) -> Nillable {
+			fn nillable(self) -> Nillable<$lf> {
 				let $convert = self;
 				$code
 			}
@@ -75,8 +68,9 @@ macro_rules! lua_table {
 	($($arm:tt)*) => {{
 		#[allow(unused_assignments, unused_mut, unused_variables, unused_imports)]
 		{
-			use std::{collections::HashMap, default::Default, sync::Mutex};
 			use $crate::{vm::value::{Table, Value}, lua_table_inner, lua_value};
+			use hashbrown::HashMap;
+			use std::{default::Default, sync::Mutex};
 
 			let mut table = HashMap::<Value, Value>::new();
 			let mut counter = 1;
@@ -123,8 +117,9 @@ macro_rules! lua_tuple {
 	($($arm:tt)*) => {{
 		#[allow(unused_assignments, unused_mut, unused_variables, unused_imports)]
 		{
-			use std::{collections::HashMap, default::Default, sync::Mutex};
 			use $crate::{vm::value::{Table, Value}, lua_tuple_inner, lua_value};
+			use hashbrown::HashMap;
+			use std::{default::Default, sync::Mutex};
 
 			let mut table = HashMap::<Value, Value>::new();
 			let mut counter = 0;
@@ -159,26 +154,26 @@ pub trait UserData {
 	fn type_name(&self) -> &'static str;
 }
 
-pub type NativeFunction<'r> = &'r dyn Fn(Arc<Table>, &VirtualMachine)
-	-> Result<Arc<Table>, String>;
+pub type NativeFunction<'n> = &'n dyn Fn(Arc<Table<'n>>, &VirtualMachine<'n>)
+	-> Result<Arc<Table<'n>>, String>;
 
 /// Represents a lua value.
 // TODO: Add floats.
 #[derive(Clone)]
-pub enum Value {
+pub enum Value<'n> {
 	Integer(i64),
 	String(Box<str>),
 	Boolean(bool),
-	Table(Arc<Table>),
+	Table(Arc<Table<'n>>),
 	UserData {
-		data: &'static dyn UserData,
-		meta: Option<Arc<Table>>
+		data: &'n dyn UserData,
+		meta: Option<Arc<Table<'n>>>
 	},
-	Function(Arc<Function>),
-	NativeFunction(NativeFunction<'static>)
+	Function(Arc<Function<'n>>),
+	NativeFunction(NativeFunction<'n>)
 }
 
-impl Value {
+impl<'n> Value<'n> {
 	pub fn new_string(string: impl AsRef<str>) -> Self {
 		Self::String(string.as_ref().to_owned().into_boxed_str())
 	}
@@ -205,7 +200,7 @@ impl Value {
 	}
 
 	/// Like [coerce_to_bool], but wraps the result in a value.
-	pub fn coerce_to_boolean(&self) -> Value {
+	pub fn coerce_to_boolean<'nn>(&self) -> Value<'nn> {
 		Value::Boolean(self.coerce_to_bool())
 	}
 
@@ -230,14 +225,14 @@ impl Value {
 		}
 	}
 
-	pub fn table(&self) -> Option<&Arc<Table>> {
+	pub fn table(&self) -> Option<&Arc<Table<'n>>> {
 		match self {
 			Self::Table(table) => Some(table),
 			_ => None
 		}
 	}
 
-	pub fn function(&self) -> Option<&Arc<Function>> {
+	pub fn function(&self) -> Option<&Arc<Function<'n>>> {
 		match self {
 			Self::Function(function) => Some(function),
 			_ => None
@@ -245,7 +240,7 @@ impl Value {
 	}
 }
 
-impl Display for Value {
+impl Display for Value<'_> {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		match self {
 			Self::Integer(integer) => write!(f, "{}", integer),
@@ -259,7 +254,7 @@ impl Display for Value {
 	}
 }
 
-impl Debug for Value {
+impl Debug for Value<'_> {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		match self {
 			Self::Integer(integer) => Debug::fmt(integer, f),
@@ -273,26 +268,26 @@ impl Debug for Value {
 	}
 }
 
-impl Eq for Value {}
+impl Eq for Value<'_> {}
 
-impl PartialEq for Value {
-	fn eq(&self, other: &Self) -> bool {
+impl<'l, 'r> PartialEq<Value<'r>> for Value<'l> {
+	fn eq(&self, other: &Value<'r>) -> bool {
 		match (self, other) {
-			(Self::Integer(a), Self::Integer(b)) => *a == *b,
-			(Self::String(a), Self::String(b)) => *a == *b,
-			(Self::Boolean(a), Self::Boolean(b)) => *a == *b,
-			(Self::Function(a), Self::Function(b)) =>
-				Arc::as_ptr(a) == Arc::as_ptr(b),
-			(Self::Table(a), Self::Table(b)) =>
-				Arc::as_ptr(a) == Arc::as_ptr(b),
-			(Self::NativeFunction(a), Self::NativeFunction(b)) =>
+			(Self::Integer(a), Value::Integer(b)) => *a == *b,
+			(Self::String(a), Value::String(b)) => *a == *b,
+			(Self::Boolean(a), Value::Boolean(b)) => *a == *b,
+			(Self::Function(a), Value::Function(b)) =>
+				eq(Arc::as_ptr(a) as *const u8, Arc::as_ptr(b) as *const u8),
+			(Self::Table(a), Value::Table(b)) =>
+				eq(Arc::as_ptr(a) as *const u8, Arc::as_ptr(b) as *const u8),
+			(Self::NativeFunction(a), Value::NativeFunction(b)) =>
 				eq(*a as *const _ as *const u8, *b as *const _ as *const u8),
 			_ => false
 		}
 	}
 }
 
-impl Hash for Value {
+impl Hash for Value<'_> {
 	fn hash<H>(&self, state: &mut H)
 			where H: Hasher {
 		match self {
@@ -308,13 +303,13 @@ impl Hash for Value {
 }
 
 value_conversions! {
-	impl for value @ i64 {Value::Integer(value)}
-	impl<'r> for value @ &'r str {Value::String(value.into())}
-	impl for value @ Box<str> {Value::String(value)}
-	impl for value @ String {Value::String(value.into_boxed_str())}
-	impl for value @ bool {Value::Boolean(value)}
-	impl for value @ Table {Value::Table(value.arc())}
-	impl for value @ Arc<Table> {Value::Table(value)}
+	impl<'n> for value @ i64 {Value::Integer(value)}
+	impl<'n; 'r> for value @ &'r str {Value::String(value.into())}
+	impl<'n> for value @ Box<str> {Value::String(value)}
+	impl<'n> for value @ String {Value::String(value.into_boxed_str())}
+	impl<'n> for value @ bool {Value::Boolean(value)}
+	impl<'n> for value @ Table<'n> {Value::Table(value.arc())}
+	impl<'n> for value @ Arc<Table<'n>> {Value::Table(value)}
 }
 
 /// Represents a lua value that may be nil. This type has a lot in common with
@@ -322,14 +317,14 @@ value_conversions! {
 /// implementations for handling lua nil values. Unlike option, NillableValue
 /// can only hold [Value]s or references to them.
 #[derive(Clone, Eq, Hash, PartialEq)]
-pub enum Nillable {
+pub enum Nillable<'n> {
 	/// Variant for when the value is not nil.
-	NonNil(Value),
+	NonNil(Value<'n>),
 	/// Variant for when the value is nil.
 	Nil
 }
 
-impl Nillable {
+impl<'n> Nillable<'n> {
 	/// Get the human readable name of the type of this value.
 	pub fn type_name(&self) -> &'static str {
 		match self {
@@ -339,7 +334,7 @@ impl Nillable {
 	}
 
 	/// Convenience method for using [Into::into] or [From::from].
-	pub fn option(self) -> Option<Value> {
+	pub fn option(self) -> Option<Value<'n>> {
 		self.into()
 	}
 
@@ -354,7 +349,7 @@ impl Nillable {
 	}
 
 	/// Like [coerce_to_bool], but wraps the result in a value.
-	pub fn coerce_to_boolean(&self) -> Value {
+	pub fn coerce_to_boolean<'nn>(&self) -> Value<'nn> {
 		Value::Boolean(self.coerce_to_bool())
 	}
 
@@ -367,7 +362,7 @@ impl Nillable {
 	}
 }
 
-impl Display for Nillable {
+impl Display for Nillable<'_> {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		match self {
 			Nillable::NonNil(value) => write!(f, "{}", value.borrow()),
@@ -376,7 +371,7 @@ impl Display for Nillable {
 	}
 }
 
-impl Debug for Nillable {
+impl Debug for Nillable<'_> {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		match self {
 			Nillable::NonNil(value) => write!(f, "{:?}", value.borrow()),
@@ -385,27 +380,27 @@ impl Debug for Nillable {
 	}
 }
 
-impl Default for Nillable {
+impl Default for Nillable<'_> {
 	fn default() -> Self {
 		Nil
 	}
 }
 
-pub trait IntoNillable: Sized {
-	fn nillable(self) -> Nillable;
+pub trait IntoNillable<'n>: Sized {
+	fn nillable(self) -> Nillable<'n>;
 }
 
 nillable_conversions! {
 	// From Option
 
-	impl all for value @ Option<Value> {
+	impl<'n> all for value @ Option<Value<'n>> {
 		match value {
 			Some(value) => NonNil(value),
 			None => Nil
 		}
 	}
 
-	impl<'r> for value @ Option<&'r Value> {
+	impl<'n; 'r> for value @ Option<&'r Value<'n>> {
 		match value {
 			Some(value) => NonNil(value.clone()),
 			None => Nil
@@ -414,23 +409,23 @@ nillable_conversions! {
 
 	// From Self or Value
 
-	impl for value @ Nillable {value}
-	impl all for value @ Value {NonNil(value)}
+	impl<'n> for value @ Nillable<'n> {value}
+	impl<'n> all for value @ Value<'n> {NonNil(value)}
 
 	// From Into<Value>
 
-	impl all for value @ i64 {NonNil(value.into())}
-	impl<'r> all for value @ &'r str {NonNil(value.into())}
-	impl all for value @ Box<str> {NonNil(value.into())}
-	impl all for value @ String {NonNil(value.into())}
-	impl all for value @ bool {NonNil(value.into())}
-	impl all for value @ Table {NonNil(value.into())}
-	impl all for value @ Arc<Table> {NonNil(value.into())}
-	impl all for _value @ () {Nil}
+	impl<'n> all for value @ i64 {NonNil(value.into())}
+	impl<'n; 'r> all for value @ &'r str {NonNil(value.into())}
+	impl<'n> all for value @ Box<str> {NonNil(value.into())}
+	impl<'n> all for value @ String {NonNil(value.into())}
+	impl<'n> all for value @ bool {NonNil(value.into())}
+	impl<'n> all for value @ Table<'n> {NonNil(value.into())}
+	impl<'n> all for value @ Arc<Table<'n>> {NonNil(value.into())}
+	impl<'n> all for _value @ () {Nil}
 }
 
-impl From<Nillable> for Option<Value> {
-	fn from(nillable: Nillable) -> Self {
+impl<'n> From<Nillable<'n>> for Option<Value<'n>> {
+	fn from(nillable: Nillable<'n>) -> Self {
 		match nillable {
 			NonNil(value) => Some(value),
 			Nil => None
@@ -439,13 +434,13 @@ impl From<Nillable> for Option<Value> {
 }
 
 #[derive(Clone, Debug)]
-pub enum MaybeUpValue {
-	UpValue(Arc<Mutex<Nillable>>),
-	Normal(Nillable)
+pub enum MaybeUpValue<'n> {
+	UpValue(Arc<Mutex<Nillable<'n>>>),
+	Normal(Nillable<'n>)
 }
 
-impl MaybeUpValue {
-	pub fn up_value(&mut self) -> &Arc<Mutex<Nillable>> {
+impl<'n> MaybeUpValue<'n> {
+	pub fn up_value(&mut self) -> &Arc<Mutex<Nillable<'n>>> {
 		match self {
 			Self::UpValue(up_value) => up_value,
 			Self::Normal(normal) => {
@@ -460,22 +455,22 @@ impl MaybeUpValue {
 	}
 }
 
-impl Default for MaybeUpValue {
+impl Default for MaybeUpValue<'_> {
 	fn default() -> Self {
 		Self::Normal(Nil)
 	}
 }
 
 #[derive(Default)]
-pub struct Table {
-	pub data: Mutex<HashMap<Value, Value>>,
-	pub metatable: Mutex<Option<Arc<Table>>>
+pub struct Table<'n> {
+	pub data: Mutex<HashMap<Value<'n>, Value<'n>>>,
+	pub metatable: Mutex<Option<Arc<Table<'n>>>>
 }
 
-impl Table {
+impl<'n> Table<'n> {
 	/// Inserts a value into this table as if it was an array.
 	#[inline]
-	pub fn array_insert(&self, index: i64, mut value: Nillable) {
+	pub fn array_insert(&self, index: i64, mut value: Nillable<'n>) {
 		let len = self.array_len();
 		let mut data = self.data.lock().unwrap();
 
@@ -489,7 +484,7 @@ impl Table {
 	}
 
 	#[inline]
-	pub fn array_remove(&self, index: i64) -> Nillable {
+	pub fn array_remove(&self, index: i64) -> Nillable<'n> {
 		let len = self.array_len();
 		let mut data = self.data.lock().unwrap();
 
@@ -505,7 +500,7 @@ impl Table {
 	}
 
 	#[inline]
-	pub fn array_push(&self, value: Nillable) {
+	pub fn array_push(&self, value: Nillable<'n>) {
 		self.array_insert(self.array_len(), value)
 	}
 
@@ -522,7 +517,7 @@ impl Table {
 
 	/// Inserts a value into this table as if it was a tuple.
 	#[inline]
-	pub fn tuple_insert(&self, index: i64, mut value: Nillable) {
+	pub fn tuple_insert(&self, index: i64, mut value: Nillable<'n>) {
 		let len = self.tuple_len();
 		let mut data = self.data.lock().unwrap();
 		data.insert(Value::Integer(0), Value::Integer(len + 1));
@@ -541,9 +536,22 @@ impl Table {
 			.unwrap().integer().unwrap()
 	}
 
-	pub fn index(&self, index: &Value) -> Nillable {
+	pub fn index<'qn>(&self, index: &Value<'qn>) -> Nillable<'n> {
+		// std::collections::HashMap::get's signature is overly strict. It requires
+		// that Q lives as long as K does, but it only uses Q as long as the call.
+		// To get around this, we *could* use the nightly feature `hash_raw_entry`,
+		// or we could just require the hash library the standard library uses under
+		// the hood, hashbrown. Obviously the less painful solution was taken.
+		// TODO: Should we drop hashbrown as a dependency when `hash_raw_entry` is
+		// stablized? Or is it better to have something that can be upgraded
+		// according to semver?
+
 		let data = self.data.lock().unwrap();
-		data.get(index).nillable()
+		let mut hasher = data.hasher().build_hasher();
+		index.hash(&mut hasher);
+		data.raw_entry().from_hash(hasher.finish(), |check| index == check)
+			.map(|(_, value)| value).cloned().nillable()
+		//todo!()
 	}
 
 	pub fn arc(self) -> Arc<Self> {
@@ -551,19 +559,19 @@ impl Table {
 	}
 }
 
-impl PartialEq for Table {
-	fn eq(&self, other: &Table) -> bool {
+impl<'n> PartialEq for Table<'n> {
+	fn eq(&self, other: &Table<'n>) -> bool {
 		eq(self, other)
 	}
 }
 
-impl Display for Table {
+impl Display for Table<'_> {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		write!(f, "table: {:p}", &*self)
 	}
 }
 
-impl Debug for Table {
+impl Debug for Table<'_> {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		match self.data.try_lock() {
 			Ok(data) => {
@@ -600,32 +608,32 @@ impl Debug for Table {
 }
 
 #[derive(Debug)]
-pub struct Function {
-	pub up_values: Box<[Arc<Mutex<Nillable>>]>,
+pub struct Function<'n> {
+	pub up_values: Box<[Arc<Mutex<Nillable<'n>>>]>,
 	pub chunk: Arc<Chunk>
 }
 
-impl Function {
+impl Function<'_> {
 	pub fn arc(self) -> Arc<Self> {
 		Arc::new(self)
 	}
 }
 
-impl PartialEq for Function {
-	fn eq(&self, other: &Function) -> bool {
+impl<'n> PartialEq for Function<'n> {
+	fn eq(&self, other: &Function<'n>) -> bool {
 		eq(self, other)
 	}
 }
 
-impl Eq for Function {}
+impl Eq for Function<'_> {}
 
-impl Display for Function {
+impl Display for Function<'_> {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		write!(f, "function: {:p}", &self)
 	}
 }
 
-impl From<Chunk> for Function {
+impl From<Chunk> for Function<'_> {
 	fn from(chunk: Chunk) -> Self {
 		Self {chunk: chunk.arc(), up_values: vec![].into_boxed_slice()}
 	}

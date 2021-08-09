@@ -46,7 +46,8 @@ macro_rules! binary_comparison {
 				let arguments = if $reverse {lua_tuple![right, left]}
 					else {lua_tuple![left, right]};
 				let result = $self.call(meta, arguments.arc())?;
-				NonNil(result.index(&Value::Integer(1)).coerce_to_boolean())
+				let r = result.index(&Value::Integer(1));
+				NonNil(r.coerce_to_boolean())
 			},
 
 			_ => return Err("unknown binary operation error".to_owned())
@@ -96,16 +97,16 @@ impl<'s> From<&'s str> for Reference<'s> {
 	}
 }
 
-pub struct VirtualMachine {
-	number_meta: Option<Arc<Table>>,
-	string_meta: Option<Arc<Table>>,
-	boolean_meta: Option<Arc<Table>>,
-	function_meta: Option<Arc<Table>>,
-	pub global: Arc<Table>
+pub struct VirtualMachine<'n> {
+	number_meta: Option<Arc<Table<'n>>>,
+	string_meta: Option<Arc<Table<'n>>>,
+	boolean_meta: Option<Arc<Table<'n>>>,
+	function_meta: Option<Arc<Table<'n>>>,
+	pub global: Arc<Table<'n>>
 }
 
-impl VirtualMachine {
-	pub fn new(global: Arc<Table>) -> Self {
+impl<'n> VirtualMachine<'n> {
+	pub fn new(global: Arc<Table<'n>>) -> Self {
 		Self {
 			number_meta: None,
 			string_meta: None,
@@ -116,8 +117,8 @@ impl VirtualMachine {
 	}
 
 	/// Executes a function.
-	pub fn execute(&self, function: &Function, arguments: Arc<Table>)
-			-> Result<Arc<Table>, String> {
+	pub fn execute(&self, function: &Function<'n>, arguments: Arc<Table<'n>>)
+			-> Result<Arc<Table<'n>>, String> {
 		let virtual_machine = self;
 		let registers = vec![Default::default(); function.chunk.registers]
 			.into_boxed_slice();
@@ -126,15 +127,15 @@ impl VirtualMachine {
 	}
 }
 
-struct StackFrame<'v, 'f> {
-	virtual_machine: &'v VirtualMachine,
-	function: &'f Function,
-	registers: Box<[self::value::MaybeUpValue]>
+struct StackFrame<'v, 'f, 'n> {
+	virtual_machine: &'v VirtualMachine<'n>,
+	function: &'f Function<'n>,
+	registers: Box<[MaybeUpValue<'n>]>
 }
 
-impl<'v, 'f> StackFrame<'v, 'f> {
+impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 	fn reference<'s>(&self, reference: impl Into<Reference<'s>>)
-			-> Nillable {
+			-> Nillable<'n> {
 		match reference.into() {
 			Reference::Global(name) => {
 				let global = self.virtual_machine.global.data.lock().unwrap();
@@ -148,7 +149,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 	}
 
 	fn write_reference<'s>(&mut self, reference: impl Into<Reference<'s>>,
-			value: Nillable) {
+			value: Nillable<'n>) {
 		match reference.into() {
 			Reference::Global(name) => {
 				let mut global = self.virtual_machine.global.data.lock().unwrap();
@@ -167,8 +168,8 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 		}
 	}
 
-	fn meta_method(&self, object: &Nillable, method: &str)
-			-> Nillable {
+	fn meta_method(&self, object: &Nillable<'n>, method: &str)
+			-> Nillable<'n> {
 		match object {
 			NonNil(Value::Integer(_)) => {
 				let meta = match self.virtual_machine.number_meta.as_ref() {
@@ -224,8 +225,8 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 		}
 	}
 
-	fn call(&self, function: Nillable, arguments: Arc<Table>)
-			-> Result<Arc<Table>, String> {
+	fn call(&self, function: Nillable<'n>, arguments: Arc<Table<'n>>)
+			-> Result<Arc<Table<'n>>, String> {
 		match function {
 			NonNil(Value::Function(function)) =>
 				self.virtual_machine.execute(&*function, arguments),
@@ -243,7 +244,7 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 		}
 	}
 
-	fn execute(&mut self, arguments: Arc<Table>) -> Result<Arc<Table>, String> {
+	fn execute(&mut self, arguments: Arc<Table<'n>>) -> Result<Arc<Table<'n>>, String> {
 		// Set arguments.
 		self.registers[0] = MaybeUpValue::Normal(NonNil(Value::Table(arguments)));
 
@@ -573,10 +574,10 @@ impl<'v, 'f> StackFrame<'v, 'f> {
 		}
 	}
 
-	fn index_read(&mut self, indexee: Nillable,
-			index: Nillable, destination: usize) -> Result<(), String> {
-		enum IndexOperation {
-			Value(Nillable),
+	fn index_read(&mut self, indexee: Nillable<'n>,
+			index: Nillable<'n>, destination: usize) -> Result<(), String> {
+		enum IndexOperation<'n> {
+			Value(Nillable<'n>),
 			NonTable,
 			NilIndex
 		}

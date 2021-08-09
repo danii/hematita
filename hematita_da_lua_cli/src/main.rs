@@ -108,7 +108,7 @@ fn show_tokens(code: &str) {
 	println!("{:#?}", tokens)
 }
 
-fn compile(code: &str) -> Result<Function, ParserError> {
+fn compile<'n>(code: &str) -> Result<Function<'n>, ParserError> {
 	let tokens = Lexer {source: code.chars().peekable()};
 	let mut tokens = TokenIterator(tokens.peekable());
 	let block = parse_block(&mut tokens)?;
@@ -117,7 +117,7 @@ fn compile(code: &str) -> Result<Function, ParserError> {
 	Ok(chunk.into())
 }
 
-fn compile_expression(code: &str) -> Result<Function, ParserError> {
+fn compile_expression<'n>(code: &str) -> Result<Function<'n>, ParserError> {
 	let tokens = Lexer {source: code.chars().peekable()};
 	let mut tokens = TokenIterator(tokens.peekable());
 	let expression = parse_expression(&mut tokens)?;
@@ -128,7 +128,7 @@ fn compile_expression(code: &str) -> Result<Function, ParserError> {
 	Ok(chunk.into())
 }
 
-fn init_vm() -> VirtualMachine {
+fn init_vm<'n>() -> VirtualMachine<'n> {
 	VirtualMachine::new(standard_globals())
 }
 

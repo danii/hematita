@@ -7,7 +7,7 @@ use self::super::{
 use itertools::Itertools;
 use std::{collections::HashMap, sync::Arc};
 
-pub fn table_to_vector(table: &Table) -> Vec<Nillable> {
+pub fn table_to_vector<'n>(table: &Table<'n>) -> Vec<Nillable<'n>> {
 	let table = table.data.lock().unwrap();
 	let end = table.get(&Value::Integer(0)).unwrap().integer().unwrap();
 
@@ -23,8 +23,8 @@ pub fn vector_to_table(vector: Vec<Option<Value>>) -> HashMap<Value, Value> {
 		.collect::<HashMap<_, _>>()
 }
 
-pub fn print(arguments: Arc<Table>, _: &VirtualMachine)
-		-> Result<Arc<Table>, String> {
+pub fn print<'n>(arguments: Arc<Table<'n>>, _: &VirtualMachine)
+		-> Result<Arc<Table<'n>>, String> {
 	let message = table_to_vector(&*arguments).into_iter()
 		.map(|argument| format!("{}", argument.nillable()))
 		.join("\t");
@@ -32,8 +32,8 @@ pub fn print(arguments: Arc<Table>, _: &VirtualMachine)
 	Ok(lua_tuple![].arc())
 }
 
-pub fn pcall(arguments: Arc<Table>, vm: &VirtualMachine)
-		-> Result<Arc<Table>, String> {
+pub fn pcall<'n>(arguments: Arc<Table<'n>>, vm: &VirtualMachine<'n>)
+		-> Result<Arc<Table<'n>>, String> {
 	Ok(match arguments.array_remove(1) {
 		NonNil(Value::Function(function)) =>
 				match vm.execute(&*function, arguments) {
@@ -51,15 +51,15 @@ pub fn pcall(arguments: Arc<Table>, vm: &VirtualMachine)
 	})
 }
 
-pub fn error(arguments: Arc<Table>, _: &VirtualMachine)
-		-> Result<Arc<Table>, String> {
+pub fn error<'n>(arguments: Arc<Table<'n>>, _: &VirtualMachine<'n>)
+		-> Result<Arc<Table<'n>>, String> {
 	Err(arguments.index(&Value::Integer(1)).option()
 		.map(|value| value.string().map(str::to_string)).flatten()
 		.unwrap_or_else(|| "(non string errors are unsupported)".to_owned()))
 }
 
-pub fn setmetatable(arguments: Arc<Table>, _: &VirtualMachine)
-		-> Result<Arc<Table>, String> {
+pub fn setmetatable<'n>(arguments: Arc<Table<'n>>, _: &VirtualMachine<'n>)
+		-> Result<Arc<Table<'n>>, String> {
 	let arguments = table_to_vector(&arguments);
 	let meta = match arguments.get(1) {
 		Some(NonNil(Value::Table(meta))) => meta.clone(),
@@ -77,8 +77,8 @@ pub fn setmetatable(arguments: Arc<Table>, _: &VirtualMachine)
 	Ok(lua_tuple![].arc())
 }
 
-pub fn getmetatable(arguments: Arc<Table>, _: &VirtualMachine)
-		-> Result<Arc<Table>, String> {
+pub fn getmetatable<'n>(arguments: Arc<Table<'n>>, _: &VirtualMachine<'n>)
+		-> Result<Arc<Table<'n>>, String> {
 	let arguments = table_to_vector(&arguments);
 	Ok(match arguments.get(0) {
 		Some(NonNil(Value::Table(table))) =>
@@ -96,12 +96,12 @@ pub fn getmetatable(arguments: Arc<Table>, _: &VirtualMachine)
 	}.arc())
 }
 
-pub fn r#type(arguments: Arc<Table>, _: &VirtualMachine)
-		-> Result<Arc<Table>, String> {
+pub fn r#type<'n>(arguments: Arc<Table<'n>>, _: &VirtualMachine<'n>)
+		-> Result<Arc<Table<'n>>, String> {
 	Ok(lua_tuple![arguments.index(&1i64.into()).type_name()].arc())
 }
 
-pub fn standard_globals() -> Arc<Table> {
+pub fn standard_globals<'n>() -> Arc<Table<'n>> {
 	let globals = lua_table! {
 		print = Value::NativeFunction(&print),
 		type = Value::NativeFunction(&r#type),
