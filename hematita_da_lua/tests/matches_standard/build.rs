@@ -8,7 +8,7 @@ static HEADER: &str = "\
 use hematita_da_lua::{
 	ast::{lexer::Lexer, parser::{TokenIterator, parse_block}},
 	compiler::compile_block, lua_lib::standard_globals,
-	vm::{value::{IntoNillableValue, Table, Value}, VirtualMachine},
+	vm::{value::{IntoNillable, Table, Value}, VirtualMachine},
 	lua_tuple
 };
 use itertools::Itertools;
