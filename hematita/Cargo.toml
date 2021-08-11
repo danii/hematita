@@ -1,6 +1,13 @@
 [package]
 name = "hematita"
 version = "0.1.0"
+description = "A memory safe Lua interpreter"
+
+keywords = ["interpreter", "lua", "vm", "virtual", "machine"]
+categories = ["compilers"]
+readme = "README.md"
+repository = "https://github.com/danii/hematita"
+
 edition = "2018"
 authors = ["Daniel Conley <himself@danii.dev>"]
 
