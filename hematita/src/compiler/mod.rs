@@ -17,12 +17,17 @@ macro_rules! insert_byte_code {
 	}}
 }
 
+/// Compiles Lua statements into bytecode.
 pub fn compile_block(block: &Block) -> Chunk {
 	let mut compiler = Generator::new();
 	compiler.compile(block);
 	compiler.finish()
 }
 
+/// Compiles Lua statements into bytecode, as a Lua function.
+///
+/// The only difference between this function and [compile_block], is that this
+/// function accepts arguments, and assigns received arguments to them.
 pub fn compile_function(block: &Block, arguments: &[String],
 		up_values: HashMap<String, (usize, bool)>, method: bool) -> Chunk {
 	let mut compiler = Generator {up_values, ..Generator::new()};

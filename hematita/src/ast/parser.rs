@@ -155,7 +155,7 @@ impl<I> TokenIterator<I>
 	}
 }
 
-/// Parses a block of lua tokens.
+/// Parses a block of Lua tokens.
 pub fn parse_block<I>(iter: &mut TokenIterator<I>) -> Result<Block>
 		where I: Iterator<Item = LexerResult<Token>> {
 	let mut statements = Vec::new();

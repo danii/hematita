@@ -1,6 +1,6 @@
 Hematita Da Lua
 ===============
-![](https://img.shields.io/crates/d/hematitia?style=for-the-badge) ![](https://img.shields.io/tokei/lines/github/danii/hematita?style=for-the-badge) ![](https://img.shields.io/crates/v/hematita?style=for-the-badge) ![](https://img.shields.io/badge/compiler%20version-unknown-007EC6?style=for-the-badge)
+![](https://img.shields.io/crates/d/hematitia?style=for-the-badge) ![](https://img.shields.io/tokei/lines/github/danii/hematita?style=for-the-badge) ![](https://img.shields.io/crates/v/hematita?style=for-the-badge) ![](https://img.shields.io/badge/compiler%20version-1.53.0-007EC6?style=for-the-badge)
 <br>
 [![](https://img.shields.io/badge/crates.io-E6B14C?style=for-the-badge&logo=rust&logoColor=000000)](https://crates.io/crates/hematita) [![](https://img.shields.io/badge/lib.rs-282A36?style=for-the-badge&logo=rust)](https://lib.rs/crates/hematita) [![](https://img.shields.io/badge/github.com-24292E?style=for-the-badge&logo=github)](https://github.com/danii/hematita) [![](https://img.shields.io/badge/sponsor_me-FF69B4?style=for-the-badge&logo=github%20sponsors&logoColor=FFFFFF)](https://github.com/sponsors/danii) [![](https://img.shields.io/badge/telegram_group-26A5E4?style=for-the-badge&logo=telegram)](https://t.me/danii_hangout)
 
@@ -87,13 +87,15 @@ Hematita is composed of four main segments. Those being, `ast::lexer`, `ast::par
 Each segment can be used on it's own, but they're best used all together. If you'd like to just lex and parse lua code, the `ast` module can totally handle that. If you'd like to just run hand crafted bytecode, the `vm` module is well suited for it. But the real effect comes from stringing everything together, to form a complete interpreter.
 
 ### The Lexer
-The lexer just turns a stream of characters into a stream of `Token`s. It's effectively just an operation over an iterator. You can read it's docs [here]().
+The lexer just turns a stream of characters into a stream of `Token`s. It's effectively just an operation over an iterator. You can read it's docs [here](https://docs.rs/hematita/0.1.0/hematita/ast/lexer/index.html), note that they are incomplete.
 
 ### The Parser
-The parser takes a stream of tokens, and turns it into a `Block`. A `Block` is just a `Vec` of `Statement`s. `Statement`s are an internal representation of a Lua statement. You can read it's docs [here](), note that they are incomplete.
+The parser takes a stream of tokens, and turns it into a `Block`. A `Block` is just a `Vec` of `Statement`s. `Statement`s are an internal representation of a Lua statement. You can read it's docs [here](https://docs.rs/hematita/0.1.0/hematita/ast/parser/index.html), note that they are incomplete.
 
 ### The Compiler
-The compiler takes a `Block`, and produces a `Chunk`. A `Chunk` is just a `Vec` of `OpCode`s, with some metadata. It is effectively a one to one transformation, so no error handling is needed. You can read it's docs [here](), note that they are incomplete.
+The compiler takes a `Block`, and produces a `Chunk`. A `Chunk` is just a `Vec` of `OpCode`s, with some metadata. It is effectively a one to one transformation, so no error handling is needed. You can read it's docs [here](https://docs.rs/hematita/0.1.0/hematita/compiler/index.html), note that they are incomplete.
 
 ### The Virtual Machine
-The virtual machine takes a `Function`, and executes it. A `Function` is just an instantiated form of a `Chunk`, with associated up-values. It can be made just by calling `into` on a `Chunk`. The virtual machine is effectively a match statement over every `OpCode`, and the code that implements it. You can read it's docs [here](), note that they are incomplete.
+The virtual machine takes a `Function`, and executes it. A `Function` is just an instantiated form of a `Chunk`, with associated up-values. It can be made just by calling `into` on a `Chunk`. The virtual machine is effectively a match statement over every `OpCode`, and the code that implements it. You can read it's docs [here](https://docs.rs/hematita/0.1.0/hematita/vm/index.html), note that they are incomplete.
+
+[internals]: #the-internals
