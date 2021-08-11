@@ -1,11 +1,13 @@
-use self::super::lexer::Token;
+use self::super::{
+	Error as ASTError, Result,
+	lexer::{Result as LexerResult, Token}
+};
 use itertools::Itertools;
 use std::{
 	convert::{TryFrom, TryInto},
 	error::Error as STDError,
 	fmt::{Display, Formatter, Result as FMTResult},
-	iter::{Peekable, from_fn},
-	result::Result as STDResult
+	iter::{Peekable, from_fn}
 };
 
 macro_rules! expression {
@@ -14,11 +16,11 @@ macro_rules! expression {
 		$(
 			$(#[$($attrib)*])*
 			fn $name<I>(iter: &mut TokenIterator<I>) -> Result<Expression>
-					where I: Iterator<Item = Token> {
+					where I: Iterator<Item = LexerResult<Token>> {
 				let mut expression = $next(iter)?;
 
 				loop {
-					match iter.peek() {
+					match iter.peek().transpose()? {
 						$(Some(Token::$token) => {
 							iter.eat();
 
@@ -38,15 +40,23 @@ macro_rules! expression {
 
 macro_rules! expect {
 	($value:expr, $type:pat) => {
-		let value = $value;
-		if !matches!(value, Some($type)) {return Err(Error(value))}
+		match $value {
+			Some(Err(error)) => return Err(ASTError::Lexer(error)),
+			Some(Ok($type)) => (),
+			Some(Ok(value)) => return Err(ASTError::Parser(Error(Some(value)))),
+			None => return Err(ASTError::Parser(Error(None)))
+		}
 	}
 }
 
 macro_rules! iter_expect {
 	($value:expr, $type:pat) => {
-		let value = $value;
-		if !matches!(value, Some($type)) {return Some(Err(Error(value)))}
+		match $value {
+			Some(Err(error)) => return Some(Err(ASTError::Lexer(error))),
+			Some(Ok($type)) => (),
+			Some(Ok(value)) => return Some(Err(ASTError::Parser(Error(Some(value))))),
+			None => return Some(Err(ASTError::Parser(Error(None))))
+		}
 	}
 }
 
@@ -59,9 +69,7 @@ macro_rules! iter_throw {
 	}
 }
 
-pub type Result<T> = STDResult<T, Error>;
-
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Error(pub Option<Token>);
 
 impl STDError for Error {}
@@ -81,10 +89,10 @@ impl Display for Error {
 /// parsing functions, and being peeked and consumed token by token via helper
 /// methods.
 pub struct TokenIterator<I>(pub Peekable<I>)
-	where I: Iterator<Item = Token>;
+	where I: Iterator<Item = LexerResult<Token>>;
 
 impl<I> TokenIterator<I>
-		where I: Iterator<Item = Token> {
+		where I: Iterator<Item = LexerResult<Token>> {
 	// Eats a token, disposing of it.
 	fn eat(&mut self) {
 		self.next();
@@ -92,22 +100,22 @@ impl<I> TokenIterator<I>
 
 	/// Returns the next token, if any.
 	#[allow(clippy::should_implement_trait)] // This will eventually be privated.
-	pub fn next(&mut self) -> Option<Token> {
+	pub fn next(&mut self) -> Option<LexerResult<Token>> {
 		loop {
 			match self.0.next() {
-				Some(Token::Comment(_)) => (),
+				Some(Ok(Token::Comment(_))) => (),
 				token => break token
 			}
 		}
 	}
 
 	/// Eats a token, then peeks the next one, if any.
-	fn eat_peek(&mut self) -> Option<Token> {
+	fn eat_peek(&mut self) -> Option<LexerResult<Token>> {
 		self.eat();
 		self.peek()
 	}
 
-	fn eat_next(&mut self) -> Option<Token> {
+	fn eat_next(&mut self) -> Option<LexerResult<Token>> {
 		self.eat();
 		self.next()
 	}
@@ -116,7 +124,7 @@ impl<I> TokenIterator<I>
 	/// identifier.
 	fn identifier(&mut self) -> String {
 		match self.next() {
-			Some(Token::Identifier(identifier)) => identifier,
+			Some(Ok(Token::Identifier(identifier))) => identifier,
 			_ => unreachable!()
 		}
 	}
@@ -124,7 +132,7 @@ impl<I> TokenIterator<I>
 	/// Returns the next token, assuming it was peeked and matched as a string.
 	fn string(&mut self) -> String {
 		match self.next() {
-			Some(Token::String(string)) => string,
+			Some(Ok(Token::String(string))) => string,
 			_ => unreachable!()
 		}
 	}
@@ -132,28 +140,28 @@ impl<I> TokenIterator<I>
 	/// Returns the next token, assuming it was peeked and matched as an integer.
 	fn integer(&mut self) -> i64 {
 		match self.next() {
-			Some(Token::Integer(integer)) => integer,
+			Some(Ok(Token::Integer(integer))) => integer,
 			_ => unreachable!()
 		}
 	}
 
 	/// Peeks the next token, if any.
-	fn peek(&mut self) -> Option<Token> {
+	fn peek(&mut self) -> Option<LexerResult<Token>> {
 		// God this borrow check bug is annoying.
 		match self.0.peek().cloned() {
-			Some(Token::Comment(_)) => {self.0.next(); self.peek()},
+			Some(Ok(Token::Comment(_))) => {self.0.next(); self.peek()},
 			token => token
 		}
 	}
 }
 
 /// Parses a block of lua tokens.
-pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
-		-> Result<Block> {
+pub fn parse_block<I>(iter: &mut TokenIterator<I>) -> Result<Block>
+		where I: Iterator<Item = LexerResult<Token>> {
 	let mut statements = Vec::new();
 
 	loop {
-		match iter.peek() {
+		match iter.peek().transpose()? {
 			// ;
 			Some(Token::SemiColon) => iter.eat(),
 
@@ -172,15 +180,15 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 				// actor = value
 				actor => {
 					let mut variables = Vec::new();
-					while let Some(Token::Comma) = iter.peek()
+					while let Some(Ok(Token::Comma)) = iter.peek()
 						{iter.eat(); variables.push(parse_expression(iter)?.try_into()?)}
 					let variables = (actor.try_into()?, variables);
 
-					let values = if let Some(Token::Assign) = iter.peek() {
+					let values = if let Some(Ok(Token::Assign)) = iter.peek() {
 						iter.eat();
 
 						let mut values = vec![parse_expression(iter)?];
-						while let Some(Token::Comma) = iter.peek()
+						while let Some(Ok(Token::Comma)) = iter.peek()
 							{iter.eat(); values.push(parse_expression(iter)?)}
 
 						values
@@ -191,21 +199,21 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 			},
 
 			// local
-			Some(Token::KeywordLocal) => match iter.eat_peek() {
+			Some(Token::KeywordLocal) => match iter.eat_peek().transpose()? {
 				// local actor = value
 				Some(Token::Identifier(_)) => {
 					// TODO: What if it's not an identifier?
 					let actor = iter.identifier();
 					let mut variables = Vec::new();
-					while let Some(Token::Comma) = iter.peek()
+					while let Some(Ok(Token::Comma)) = iter.peek()
 						{iter.eat(); variables.push(iter.identifier())}
 					let variables = (actor, variables);
 
-					let values = if let Some(Token::Assign) = iter.peek() {
+					let values = if let Some(Ok(Token::Assign)) = iter.peek() {
 						iter.eat();
 
 						let mut values = vec![parse_expression(iter)?];
-						while let Some(Token::Comma) = iter.peek()
+						while let Some(Ok(Token::Comma)) = iter.peek()
 							{iter.eat(); values.push(parse_expression(iter)?)}
 
 						values
@@ -218,7 +226,7 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 				Some(Token::KeywordFunction) =>
 					statements.push(parse_function_statement(iter, true)?),
 
-				_ => break Err(Error(iter.next()))
+				_ => break Err(ASTError::Parser(Error(iter.next().transpose()?)))
 			},
 
 			// function actor()
@@ -244,7 +252,7 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 				loop {
 					values.push(parse_expression(iter)?);
 					match iter.peek() {
-						Some(Token::Comma) => iter.eat(),
+						Some(Ok(Token::Comma)) => iter.eat(),
 						_ => break
 					}
 				}
@@ -277,7 +285,7 @@ pub fn parse_block(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 */
 
 pub fn parse_expression<I>(iter: &mut TokenIterator<I>) -> Result<Expression>
-		where I: Iterator<Item = Token> {
+		where I: Iterator<Item = LexerResult<Token>> {
 	parse_expression_logical_or(iter)
 }
 
@@ -324,11 +332,11 @@ expression! {
 
 // Note the right associativity.
 pub fn parse_expression_concat<I>(iter: &mut TokenIterator<I>)
-		-> Result<Expression> where I: Iterator<Item = Token> {
+		-> Result<Expression> where I: Iterator<Item = LexerResult<Token>> {
 	let mut expression = parse_expression_term(iter)?;
 
 	loop {
-		if let Some(Token::Concat) = iter.peek() {
+		if let Some(Ok(Token::Concat)) = iter.peek() {
 			iter.eat();
 
 			expression = Expression::BinaryOperation {
@@ -342,9 +350,9 @@ pub fn parse_expression_concat<I>(iter: &mut TokenIterator<I>)
 
 // Uses recursion over loops.
 pub fn parse_expression_unary<I>(iter: &mut TokenIterator<I>)
-		-> Result<Expression> where I: Iterator<Item = Token> {
+		-> Result<Expression> where I: Iterator<Item = LexerResult<Token>> {
 	Ok(match iter.peek() {
-		Some(Token::KeywordNot) => {
+		Some(Ok(Token::KeywordNot)) => {
 			iter.eat();
 
 			Expression::UnaryOperation {
@@ -353,7 +361,7 @@ pub fn parse_expression_unary<I>(iter: &mut TokenIterator<I>)
 			}
 		},
 
-		Some(Token::Length) => {
+		Some(Ok(Token::Length)) => {
 			iter.eat();
 
 			Expression::UnaryOperation {
@@ -362,7 +370,7 @@ pub fn parse_expression_unary<I>(iter: &mut TokenIterator<I>)
 			}
 		},
 
-		Some(Token::Minus) => {
+		Some(Ok(Token::Minus)) => {
 			iter.eat();
 
 			Expression::UnaryOperation {
@@ -371,7 +379,7 @@ pub fn parse_expression_unary<I>(iter: &mut TokenIterator<I>)
 			}
 		},
 
-		Some(Token::BitwiseNotOrXOr) => {
+		Some(Ok(Token::BitwiseNotOrXOr)) => {
 			iter.eat();
 
 			Expression::UnaryOperation {
@@ -386,11 +394,11 @@ pub fn parse_expression_unary<I>(iter: &mut TokenIterator<I>)
 
 // Again, note the right associativity.
 pub fn parse_expression_exponent<I>(iter: &mut TokenIterator<I>)
-		-> Result<Expression> where I: Iterator<Item = Token> {
+		-> Result<Expression> where I: Iterator<Item = LexerResult<Token>> {
 	let mut expression = parse_expression_primary(iter)?;
 
 	loop {
-		if let Some(Token::Exponent) = iter.peek() {
+		if let Some(Ok(Token::Exponent)) = iter.peek() {
 			iter.eat();
 			expression = Expression::BinaryOperation {
 				left: Box::new(expression),
@@ -402,8 +410,8 @@ pub fn parse_expression_exponent<I>(iter: &mut TokenIterator<I>)
 }
 
 pub fn parse_expression_primary<I>(iter: &mut TokenIterator<I>)
-			-> Result<Expression> where I: Iterator<Item = Token> {
-	Ok(match iter.peek() {
+			-> Result<Expression> where I: Iterator<Item = LexerResult<Token>> {
+	Ok(match iter.peek().transpose()? {
 		// Literals
 		Some(Token::Identifier(_)) => {
 			let identifier = iter.identifier(); // Ugh
@@ -429,28 +437,30 @@ pub fn parse_expression_primary<I>(iter: &mut TokenIterator<I>)
 		Some(Token::OpenCurly) => parse_table(iter)?,
 		Some(Token::KeywordFunction) => parse_function_expression(iter)?,
 
-		_ => return Err(Error(iter.next()))
+		_ => return Err(ASTError::Parser(Error(iter.next().transpose()?)))
 	})
 }
 
 /// Only literals and expressions in parenthesis run this function after being
 /// parsed.
 pub fn parse_expression_inner<I>(iter: &mut TokenIterator<I>, actor: Expression)
-		-> Result<Expression> where I: Iterator<Item = Token> {
-	match iter.peek() {
+		-> Result<Expression> where I: Iterator<Item = LexerResult<Token>> {
+	match iter.peek().transpose()? {
 		// actor()
 		Some(Token::OpenParen) => {
 			let mut first = true;
-			let arguments = from_fn(|| match iter.peek() {
-				Some(Token::OpenParen) if first => {
+			let arguments = from_fn(|| match iter.peek().transpose() {
+				Ok(Some(Token::OpenParen)) if first => {
 					iter.eat(); first = false;
-					if let Some(Token::CloseParen) = iter.peek()
+					if let Some(Ok(Token::CloseParen)) = iter.peek()
 						{iter.eat(); return None}
 					Some(parse_expression(iter))
-				},
-				Some(Token::Comma) => {iter.eat(); Some(parse_expression(iter))},
-				Some(Token::CloseParen) => {iter.eat(); None},
-				_ => Some(Err(Error(iter.next())))
+				}
+				Ok(Some(Token::Comma)) => {iter.eat(); Some(parse_expression(iter))},
+				Ok(Some(Token::CloseParen)) => {iter.eat(); None},
+				Ok(_) => Some(Err(ASTError::Parser(Error(
+					iter.next().transpose().unwrap())))),
+				Err(error) => Some(Err(ASTError::Lexer(error)))
 			}).try_collect()?;
 
 			let function = Box::new(actor);
@@ -472,7 +482,7 @@ pub fn parse_expression_inner<I>(iter: &mut TokenIterator<I>, actor: Expression)
 		},
 
 		// actor.
-		Some(Token::Period) => match iter.eat_peek() {
+		Some(Token::Period) => match iter.eat_peek().transpose()? {
 			// actor.identifier
 			Some(Token::Identifier(_)) => {
 				let index = Box::new(Expression::String(iter.identifier()));
@@ -482,30 +492,32 @@ pub fn parse_expression_inner<I>(iter: &mut TokenIterator<I>, actor: Expression)
 			},
 
 			// No other token but an identifier is expected here.
-			_ => Err(Error(iter.next()))
+			_ => Err(ASTError::Parser(Error(iter.next().transpose()?)))
 		},
 
 		// actor:
-		Some(Token::Colon) => match {iter.eat(); iter.next()} {
+		Some(Token::Colon) => match {iter.eat(); iter.next().transpose()?} {
 			Some(Token::Identifier(method)) => {
 				let mut first = true;
-				let arguments = from_fn(|| match iter.peek() {
-					Some(Token::OpenParen) if first => {
+				let arguments = from_fn(|| match iter.peek().transpose() {
+					Ok(Some(Token::OpenParen)) if first => {
 						iter.eat(); first = false;
-						if let Some(Token::CloseParen) = iter.peek()
+						if let Some(Ok(Token::CloseParen)) = iter.peek()
 							{iter.eat(); return None}
 						Some(parse_expression(iter))
 					},
-					Some(Token::Comma) => {iter.eat(); Some(parse_expression(iter))},
-					Some(Token::CloseParen) => {iter.eat(); None},
-					_ => Some(Err(Error(iter.next())))
+					Ok(Some(Token::Comma)) => {iter.eat(); Some(parse_expression(iter))},
+					Ok(Some(Token::CloseParen)) => {iter.eat(); None},
+					Ok(_) => Some(Err(ASTError::Parser(Error(
+						iter.next().transpose().unwrap())))),
+					Err(error) => Some(Err(ASTError::Lexer(error)))
 				}).try_collect()?;
 
 				let class = Box::new(actor);
 				parse_expression_inner(iter,
 					Expression::MethodCall {class, method, arguments})
 			},
-			token => Err(Error(token))
+			token => Err(ASTError::Parser(Error(token)))
 		},
 
 		// actor[]
@@ -516,9 +528,9 @@ pub fn parse_expression_inner<I>(iter: &mut TokenIterator<I>, actor: Expression)
 			let result = parse_expression_inner(iter, Expression::Index {
 				index, indexee: Box::new(actor)
 			})?;
-			match iter.next() {
+			match iter.next().transpose()? {
 				Some(Token::CloseBracket) => parse_expression_inner(iter, result),
-				token => Err(Error(token))
+				token => Err(ASTError::Parser(Error(token)))
 			}
 		},
 
@@ -526,15 +538,15 @@ pub fn parse_expression_inner<I>(iter: &mut TokenIterator<I>, actor: Expression)
 	}
 }
 
-pub fn parse_table(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
-		-> Result<Expression> {
+pub fn parse_table<I>(iter: &mut TokenIterator<I>) -> Result<Expression>
+		where I: Iterator<Item = LexerResult<Token>> {
 	expect!(iter.next(), Token::OpenCurly);
 
 	let mut array = Vec::new();
 	let mut key_value = Vec::new();
 	let mut first = true;
 	loop {
-		match iter.peek() {
+		match iter.peek().transpose()? {
 			// [actor] = value
 			Some(Token::OpenBracket) => {
 				iter.eat(); let key = parse_expression(iter)?;
@@ -542,7 +554,7 @@ pub fn parse_table(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 				expect!(iter.next(), Token::Assign);
 				let value = parse_expression(iter)?;
 
-				match iter.next() {
+				match iter.next().transpose()? {
 					// [actor] = value,
 					Some(Token::Comma) => key_value.push(KeyValue {key, value}),
 
@@ -553,7 +565,7 @@ pub fn parse_table(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 					},
 
 					// Unexpected token.
-					token => break Err(Error(token))
+					token => break Err(ASTError::Parser(Error(token)))
 				}
 			},
 
@@ -561,14 +573,14 @@ pub fn parse_table(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 			Some(Token::Identifier(_)) => {
 				let key = Expression::String(iter.identifier());
 
-				match iter.next() {
+				match iter.next().transpose()? {
 					// actor,
 					Some(Token::Comma) => array.push(key),
 		
 					// actor = value
 					Some(Token::Assign) => {
 						let value = parse_expression(iter)?;
-						match iter.next() {
+						match iter.next().transpose()? {
 							// actor = value,
 							Some(Token::Comma) => key_value.push(KeyValue {key, value}),
 		
@@ -579,7 +591,7 @@ pub fn parse_table(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 							},
 		
 							// Unexpected token.
-							token => break Err(Error(token))
+							token => break Err(ASTError::Parser(Error(token)))
 						}
 					},
 		
@@ -590,7 +602,7 @@ pub fn parse_table(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 					},
 		
 					// Unexpected token.
-					token => break Err(Error(token))
+					token => break Err(ASTError::Parser(Error(token)))
 				}
 			},
 
@@ -602,7 +614,7 @@ pub fn parse_table(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 			_ => {
 				array.push(parse_expression(iter)?);
 
-				match iter.next() {
+				match iter.next().transpose()? {
 					// expr,
 					Some(Token::Comma) => continue,
 
@@ -611,7 +623,7 @@ pub fn parse_table(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 						break Ok(Expression::Table {array, key_value}),
 
 					// Unexpected token.
-					token => break Err(Error(token))
+					token => break Err(ASTError::Parser(Error(token)))
 				}
 			}
 		}
@@ -621,28 +633,29 @@ pub fn parse_table(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 	}
 }
 
-pub fn parse_if(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
-		-> Result<Statement> {
+pub fn parse_if<I>(iter: &mut TokenIterator<I>) -> Result<Statement>
+		where I: Iterator<Item = LexerResult<Token>> {
 	expect!(iter.next(), Token::KeywordIf);
 	let condition = parse_expression(iter)?;
 	expect!(iter.next(), Token::KeywordThen);
 	let then = parse_block(iter)?;
 
 	let mut r#else = None;
-	let else_ifs = from_fn(|| match iter.next() {
-		Some(Token::KeywordEnd) => None,
-		Some(Token::KeywordElseIf) => {
+	let else_ifs = from_fn(|| match iter.next().transpose() {
+		Ok(Some(Token::KeywordEnd)) => None,
+		Ok(Some(Token::KeywordElseIf)) => {
 			let condition = iter_throw!(parse_expression(iter));
 			iter_expect!(iter.next(), Token::KeywordThen);
 			let then = iter_throw!(parse_block(iter));
 			Some(Ok(ElseIf {condition, then}))
 		},
-		Some(Token::KeywordElse) => {
+		Ok(Some(Token::KeywordElse)) => {
 			r#else = Some(iter_throw!(parse_block(iter)));
 			iter_expect!(iter.next(), Token::KeywordEnd);
 			None
 		},
-		token => Some(Err(Error(token)))
+		Ok(token) => Some(Err(ASTError::Parser(Error(token)))),
+		Err(error) => Some(Err(ASTError::Lexer(error)))
 	}).try_collect()?;
 
 	Ok(Statement::If {
@@ -653,29 +666,29 @@ pub fn parse_if(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 	})
 }
 
-pub fn parse_for(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
-		-> Result<Statement> {
+pub fn parse_for<I>(iter: &mut TokenIterator<I>) -> Result<Statement>
+		where I: Iterator<Item = LexerResult<Token>> {
 	expect!(iter.next(), Token::KeywordFor);
-	let variable = match iter.next() {
+	let variable = match iter.next().transpose()? {
 		Some(Token::Identifier(argument)) => argument,
-		token => return Err(Error(token))
+		token => return Err(ASTError::Parser(Error(token)))
 	};
 
-	match iter.next() {
+	match iter.next().transpose()? {
 		// for i = 1, i < 10, 2 do
 		Some(Token::Assign) => {
 			let first = parse_expression(iter)?;
 			expect!(iter.next(), Token::Comma);
 			let limit = parse_expression(iter)?;
 
-			let step = match iter.next() {
+			let step = match iter.next().transpose()? {
 				Some(Token::Comma) => {
 					let step = parse_expression(iter)?;
 					expect!(iter.next(), Token::KeywordDo);
 					step
 				},
 				Some(Token::KeywordDo) => Expression::Integer(1),
-				token => return Err(Error(token))
+				token => return Err(ASTError::Parser(Error(token)))
 			};
 
 			let r#do = parse_block(iter)?;
@@ -692,13 +705,13 @@ pub fn parse_for(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 			Ok(Statement::GenericFor {variable, iterator, r#do})
 		},
 
-		token => Err(Error(token))
+		token => Err(ASTError::Parser(Error(token)))
 	}
 }
 
-pub fn parse_while(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
-		-> Result<Statement> {
-	Ok(match iter.next() {
+pub fn parse_while<I>(iter: &mut TokenIterator<I>) -> Result<Statement>
+		where I: Iterator<Item = LexerResult<Token>> {
+	Ok(match iter.next().transpose()? {
 		// while condition do
 		Some(Token::KeywordWhile) => {
 			let condition = parse_expression(iter)?;
@@ -717,54 +730,58 @@ pub fn parse_while(iter: &mut TokenIterator<impl Iterator<Item = Token>>)
 		},
 
 		// Unexpected token.
-		token => return Err(Error(token))
+		token => return Err(ASTError::Parser(Error(token)))
 	})
 }
 
 fn parse_tuple<'i, I>(iter: &'i mut TokenIterator<I>)
 		-> impl Iterator<Item = Result<String>> + 'i
-			where I: Iterator<Item = Token> {
+			where I: Iterator<Item = LexerResult<Token>> {
 	let mut first = true;
-	from_fn(move || match iter.peek() {
-		Some(Token::OpenParen) if first => {
+	from_fn(move || match iter.peek().transpose() {
+		Ok(Some(Token::OpenParen)) if first => {
 			iter.eat(); first = false;
-			match iter.next() {
-				Some(Token::Identifier(argument)) => Some(Ok(argument)),
-				Some(Token::CloseParen) => None,
-				token => Some(Err(Error(token)))
+			match iter.next().transpose() {
+				Ok(Some(Token::Identifier(argument))) => Some(Ok(argument)),
+				Ok(Some(Token::CloseParen)) => None,
+				Ok(token) => Some(Err(ASTError::Parser(Error(token)))),
+				Err(error) => Some(Err(ASTError::Lexer(error)))
 			}
 		},
-		Some(Token::Comma) => {
+		Ok(Some(Token::Comma)) => {
 			iter.eat();
-			match iter.next() {
-				Some(Token::Identifier(argument)) => Some(Ok(argument)),
-				token => Some(Err(Error(token)))
+			match iter.next().transpose() {
+				Ok(Some(Token::Identifier(argument))) => Some(Ok(argument)),
+				Ok(token) => Some(Err(ASTError::Parser(Error(token)))),
+				Err(error) => Some(Err(ASTError::Lexer(error)))
 			}
 		},
-		Some(Token::CloseParen) => {iter.eat(); None},
-		_ => Some(Err(Error(iter.next())))
+		Ok(Some(Token::CloseParen)) => {iter.eat(); None},
+		Ok(_) => Some(Err(ASTError::Parser(Error(
+			iter.next().transpose().unwrap())))),
+		Err(error) => Some(Err(ASTError::Lexer(error)))
 	})
 }
 
 pub fn parse_function_statement<I>(iter: &mut TokenIterator<I>, local: bool)
-		-> Result<Statement> where I: Iterator<Item = Token> {
+		-> Result<Statement> where I: Iterator<Item = LexerResult<Token>> {
 	expect!(iter.next(), Token::KeywordFunction);
 
-	let name_first = match iter.next() {
+	let name_first = match iter.next().transpose()? {
 		Some(Token::Identifier(name)) => name,
-		token => return Err(Error(token))
+		token => return Err(ASTError::Parser(Error(token)))
 	};
 	let name_rest = (!local).then(|| {
 		let mut rest = Vec::new();
 		loop {
 			match iter.peek() {
-				Some(Token::Colon) => match iter.eat_next() {
+				Some(Ok(Token::Colon)) => match iter.eat_next().transpose()? {
 					Some(Token::Identifier(name)) => break Ok((rest, Some(name))),
-					token => return Err(Error(token))
+					token => return Err(ASTError::Parser(Error(token)))
 				},
-				Some(Token::Period) => match iter.eat_next() {
+				Some(Ok(Token::Period)) => match iter.eat_next().transpose()? {
 					Some(Token::Identifier(name)) => rest.push(name),
-					token => return Err(Error(token))
+					token => return Err(ASTError::Parser(Error(token)))
 				},
 				_ => break Ok((rest, None))
 			}
@@ -786,7 +803,7 @@ pub fn parse_function_statement<I>(iter: &mut TokenIterator<I>, local: bool)
 }
 
 pub fn parse_function_expression<I>(iter: &mut TokenIterator<I>)
-		-> Result<Expression> where I: Iterator<Item = Token> {
+		-> Result<Expression> where I: Iterator<Item = LexerResult<Token>> {
 	expect!(iter.next(), Token::KeywordFunction);
 
 	let arguments = parse_tuple(iter).try_collect()?;
@@ -1175,7 +1192,7 @@ pub enum AssignmentTarget {
 }
 
 impl TryFrom<Expression> for AssignmentTarget {
-	type Error = Error;
+	type Error = ASTError;
 
 	fn try_from(value: Expression) -> Result<Self> {
 		Ok(match value {
@@ -1183,7 +1200,7 @@ impl TryFrom<Expression> for AssignmentTarget {
 				Self::Identifier(identifier),
 			Expression::Index {indexee, index} =>
 				Self::Index {indexee: *indexee, index: *index},
-			_ => return Err(Error(None)) // TODO
+			_ => return Err(ASTError::Parser(Error(None))) // TODO
 		})
 	}
 }

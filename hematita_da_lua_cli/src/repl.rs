@@ -1,12 +1,12 @@
 use self::super::{compile, compile_expression, handle_io};
 use hematita_da_lua::{
-	ast::parser::Error,
+	ast::{parser::Error as ParserError, Error},
 	lua_lib::print,
-	vm::{VirtualMachine, value::{NillableValue::{Nil, NonNil}, Table, Value}}
+	vm::{VirtualMachine, value::{Nillable::{Nil, NonNil}, Table, Value}}
 };
 use std::io::{BufRead, Write, stdin, stdout};
 
-pub fn repl(vm: VirtualMachine) {
+pub fn repl<'n>(vm: VirtualMachine<'n>) {
 	loop {
 		let mut code = String::new();
 
@@ -27,12 +27,11 @@ pub fn repl(vm: VirtualMachine) {
 			});
 
 			match compile_expression(&code).or_else(|_| compile(&code)) {
-				Err(Error(None)) => (),
-				Err(Error(Some(error))) => break Err(error),
-				Ok(function) => break Ok(function)
+				Err(Error::Parser(ParserError(None))) => (),
+				other => break other
 			}
 		} {
-			Err(error) => eprintln!("syntax error: unexpected {}", error),
+			Err(error) => eprintln!("syntax error: {}", error),
 			Ok(function) => match vm.execute(&function, Table::default().arc()) {
 				Ok(output) => match output.index(&Value::Integer(1)) {
 					NonNil(_) => {print(output, &vm).unwrap();},

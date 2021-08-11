@@ -14,14 +14,14 @@ static HEADER: &str = "\
 use hematita_da_lua::{
 	ast::{lexer::Lexer, parser::{TokenIterator, parse_block}},
 	compiler::compile_block, lua_lib::standard_globals,
-	vm::{value::{IntoNillableValue, Table, Value}, VirtualMachine},
+	vm::{value::{IntoNillable, Table, Value}, VirtualMachine},
 	lua_tuple
 };
 use itertools::Itertools;
 use std::{process::Command, sync::{Arc, Mutex}};
 use diff::{Result as Diff, lines};
 
-fn table_to_vector(table: &Table) -> Vec<Option<Value>> {
+fn table_to_vector<'n>(table: &Table<'n>) -> Vec<Option<Value<'n>>> {
 	let table = table.data.lock().unwrap();
 	let end = table.get(&Value::Integer(0)).unwrap().integer().unwrap();
 
@@ -32,26 +32,26 @@ fn table_to_vector(table: &Table) -> Vec<Option<Value>> {
 
 /// Executes [code] using Hematita.
 fn hematita(code: &str) -> String {
-	let tokens = Lexer {source: code.chars().peekable()}.peekable();
-	let parsed = parse_block(&mut TokenIterator(tokens)).unwrap();
-	let function = compile_block(&parsed).into();
-
 	let output = Arc::new(Mutex::new(String::new()));
 	let print_output = output.clone();
-	let print = Box::leak(Box::new(move |arguments: Arc<_>, _: &'_ _| {
+	let print = move |arguments: Arc<_>, _: &'_ _| {
 		let message = table_to_vector(&*arguments).into_iter()
 			.map(|argument| format!(\"{}\", argument.nillable()))
 			.join(\"\t\");
 		let mut output = output.lock().unwrap();
 		output.push_str(&message); output.push('\\n');
 		Ok(lua_tuple![].arc())
-	}));
+	};
+
+	let tokens = Lexer {source: code.chars().peekable()}.peekable();
+	let parsed = parse_block(&mut TokenIterator(tokens)).unwrap();
+	let function = compile_block(&parsed).into();
 
 	let globals = {
 		let globals = standard_globals();
 		{
 			let mut data = globals.data.lock().unwrap();
-			data.insert(Value::new_string(\"print\"), Value::NativeFunction(print));
+			data.insert(Value::new_string(\"print\"), Value::NativeFunction(&print));
 		}
 		globals
 	};

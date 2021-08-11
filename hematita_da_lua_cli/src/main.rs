@@ -15,7 +15,8 @@ use hematita_da_lua::{
 			Statement,
 			TokenIterator,
 			parse_block, parse_expression
-		}
+		},
+		Error as ASTError
 	},
 	compiler::compile_block,
 	lua_lib::standard_globals,
@@ -108,27 +109,29 @@ fn show_tokens(code: &str) {
 	println!("{:#?}", tokens)
 }
 
-fn compile(code: &str) -> Result<Function, ParserError> {
+fn compile<'n>(code: &str) -> Result<Function<'n>, ASTError> {
 	let tokens = Lexer {source: code.chars().peekable()};
 	let mut tokens = TokenIterator(tokens.peekable());
 	let block = parse_block(&mut tokens)?;
-	if let Some(token) = tokens.next() {return Err(ParserError(Some(token)))};
+	if let Some(token) = tokens.next().transpose()?
+		{return Err(ASTError::Parser(ParserError(Some(token))))};
 	let chunk = compile_block(&block);
 	Ok(chunk.into())
 }
 
-fn compile_expression(code: &str) -> Result<Function, ParserError> {
+fn compile_expression<'n>(code: &str) -> Result<Function<'n>, ASTError> {
 	let tokens = Lexer {source: code.chars().peekable()};
 	let mut tokens = TokenIterator(tokens.peekable());
 	let expression = parse_expression(&mut tokens)?;
-	if let Some(token) = tokens.next() {return Err(ParserError(Some(token)))};
+	if let Some(token) = tokens.next().transpose()?
+		{return Err(ASTError::Parser(ParserError(Some(token))))};
 	let statement = Statement::Return {values: vec![expression]};
 	let block = Block(vec![statement]);
 	let chunk = compile_block(&block);
 	Ok(chunk.into())
 }
 
-fn init_vm() -> VirtualMachine {
+fn init_vm<'n>() -> VirtualMachine<'n> {
 	VirtualMachine::new(standard_globals())
 }
 

@@ -5,10 +5,8 @@ edition = "2018"
 authors = ["Daniel Conley <himself@danii.dev>"]
 
 [dependencies]
+hashbrown = "0.11.2"
 itertools = "0.10.1"
-genawaiter = "0.99.1"
-if_chain = "1.0.1"
-maplit = "1.0.2"
 visibility = "0.0.1"
 
 [dev-dependencies]

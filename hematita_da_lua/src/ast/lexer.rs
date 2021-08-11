@@ -1,4 +1,33 @@
-use std::iter::Peekable;
+use std::{
+	error::Error as STDError,
+	fmt::{Display, Formatter, Result as FMTResult},
+	iter::Peekable,
+	result::Result as STDResult
+};
+
+pub type Result<T> = STDResult<T, Error>;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Error {
+	UnexpectedCharacter(char),
+	IllegalEscapeCode(char),
+	NumberTooLarge(Box<str>)
+}
+
+impl STDError for Error {}
+
+impl Display for Error {
+	fn fmt(&self, f: &mut Formatter<'_>) -> FMTResult {
+		match self {
+			Self::UnexpectedCharacter(character) =>
+				write!(f, "unexpected symbol {:?}", character),
+			Self::IllegalEscapeCode(character) =>
+				write!(f, "invalid escape sequence '\\{}'", character),
+			Self::NumberTooLarge(number) =>
+				write!(f, "number too large {}", number)
+		}
+	}
+}
 
 /// Tokenizes a Lua text file, character by character.
 ///
@@ -12,19 +41,12 @@ use std::iter::Peekable;
 /// # use hematita_da_lua::ast::lexer::{Lexer, Token};
 /// let mut lexer = Lexer {source: "print('hello world!')".chars().peekable()};
 ///
-/// assert_eq!(lexer.next(), Some(Token::Identifier("print".to_owned())));
-/// assert_eq!(lexer.next(), Some(Token::OpenParen));
-/// assert_eq!(lexer.next(), Some(Token::String("hello world!".to_owned())));
-/// assert_eq!(lexer.next(), Some(Token::CloseParen));
+/// assert_eq!(lexer.next(), Some(Ok(Token::Identifier("print".to_owned()))));
+/// assert_eq!(lexer.next(), Some(Ok(Token::OpenParen)));
+/// assert_eq!(lexer.next(), Some(Ok(Token::String("hello world!".to_owned()))));
+/// assert_eq!(lexer.next(), Some(Ok(Token::CloseParen)));
 /// assert_eq!(lexer.next(), None);
 /// ```
-///
-/// Future Compatibility Notes
-/// --------------------------
-/// In another breaking release, this will be changed to emit [`Token`]s wrapped
-/// in [`Result`]s instead, as parsing a select few tokens may cause the Lexer
-/// to panic. For more information, please see
-/// [`next`](<Lexer as Iterator>::next).
 pub struct Lexer<T>
 		where T: Iterator<Item = char> {
 	pub source: Peekable<T>
@@ -163,7 +185,7 @@ impl<T> Lexer<T>
 	fn parse_whitespace(&mut self) -> Option<char> {
 		loop {
 			match self.peek()? {
-				' ' | '\n' | '\t' => self.eat(),
+				' ' | '\n' | '\r' | '\t' => self.eat(),
 				character => break Some(character)
 			}
 		}
@@ -190,13 +212,13 @@ impl<T> Lexer<T>
 	/// 	Some(Token::Identifier("ok".to_string())));
 	/// ```
 	#[cfg_attr(test, visibility::make(pub))]
-	fn parse_identifier(&mut self) -> Option<Token> {
+	fn parse_identifier(&mut self) -> Token {
 		let mut identifier = String::new();
 
 		while let Some('a'..='z' | 'A'..='Z' | '0'..='9' | '_') = self.peek()
 			{identifier.push(self.peeked_next())}
 
-		Some(match &identifier as &str {
+		match &identifier as &str {
 			"and" => Token::KeywordAnd,
 			"true" => Token::LiteralTrue,
 			"false" => Token::LiteralFalse,
@@ -220,7 +242,7 @@ impl<T> Lexer<T>
 			"until" => Token::KeywordUntil,
 			"while" => Token::KeywordWhile,
 			_ => Token::Identifier(identifier)
-		})
+		}
 	}
 
 	/// Parses a string into a token. Assumes the first quote character *was not*
@@ -237,15 +259,8 @@ impl<T> Lexer<T>
 	/// assert_eq!(lexer.parse_string(),
 	/// 	Some(Token::String("hi\n".to_owned())));
 	/// ```
-	///
-	/// Future Compatibility Notes
-	/// --------------------------
-	/// As of current, this function may panic if an incorrect escape sequence is
-	/// used. In the future, this will be mitigated by changing the return type of
-	/// this function from an [`Option`]`<`[`Token`]`>` to a
-	/// [`Result`]`<`[`Token`]`, E>`, where the type of `E` is still up to debate.
 	#[cfg_attr(test, visibility::make(pub))]
-	fn parse_string(&mut self) -> Option<Token> {
+	fn parse_string(&mut self) -> Option<Result<Token>> {
 		let delimiter = self.peeked_next();
 		let mut string = String::new();
 
@@ -264,10 +279,10 @@ impl<T> Lexer<T>
 					'\'' => {self.eat(); string.push('\'')},
 					'[' => {self.eat(); string.push('[')},
 					']' => {self.eat(); string.push(']')},
-					_ => todo!()
+					character => break Some(Err(Error::IllegalEscapeCode(character)))
 				},
 				character if character == delimiter =>
-					{self.eat(); break Some(Token::String(string))},
+					{self.eat(); break Some(Ok(Token::String(string)))},
 				_ => string.push(self.peeked_next())
 			}
 		}
@@ -304,21 +319,14 @@ impl<T> Lexer<T>
 	///
 	/// assert_eq!(lexer.parse_number(), Some(Token::Integer(123)));
 	/// ```
-	///
-	/// Future Compatibility Notes
-	/// --------------------------
-	/// As of current, this function may panic if the number overflows an [`i64`].
-	/// In the future, this will be mitigated by, (hopefully first introducing
-	/// [`f64`]s into the interpreter, and), changing the return type of this
-	/// function from an [`Option`]`<`[`Token`]`>` into a
-	/// [`Result`]`<`[`Token`]`, E>`, where the type of `E` is still up to debate.
 	#[cfg_attr(test, visibility::make(pub))]
-	fn parse_number(&mut self) -> Option<Token> {
+	fn parse_number(&mut self) -> Result<Token> {
 		let mut number = String::new();
 		while let Some('0'..='9') = self.peek()
 			{number.push(self.peeked_next())}
-		// TODO: Handle unwrap!
-		Some(Token::Integer(number.parse().unwrap()))
+		number.parse()
+			.map(|number| Token::Integer(number))
+			.map_err(|_| Error::NumberTooLarge(number.into_boxed_str()))
 	}
 
 	/// Parses a comment into a token. Assumes the first characters were `--`,
@@ -416,90 +424,90 @@ impl<T> Lexer<T>
 /// The main interface to the Lexer.
 impl<T> Iterator for Lexer<T>
 		where T: Iterator<Item = char> {
-	type Item = Token;
+	type Item = Result<Token>;
 
 	/// Parses a single token and returns it.
 	///
 	/// After all tokens have been parsed and the underlying character iterator
 	/// is exhausted, *or* an error occurs, this will return `None` from
 	/// thenforth.
-	fn next(&mut self) -> Option<Token> {
-		Some(match self.parse_whitespace()? {
+	fn next(&mut self) -> Option<Result<Token>> {
+		match self.parse_whitespace()? {
 			// TODO: Error handling on complex cases.
 			// Complex
 
 			// Single character token Minus (-)
 			// OR Multiple character Comment (--[[]])
-			'-' => match {self.eat(); self.peek().unwrap()} {
-				'-' => {self.eat(); self.parse_comment().unwrap()},
-				_ => Token::Minus
+			'-' => match {self.eat(); self.peek()} {
+				Some('-') => {self.eat(); self.parse_comment().map(Ok)},
+				_ => Some(Ok(Token::Minus))
 			},
 
 			// Single character token OpenBracket ([)
 			// OR Multiple character token String ([[]])
-			'[' => match {self.eat(); self.peek().unwrap()} {
-				'=' | '[' => self.parse_bracketed_string().unwrap(),
-				_ => Token::OpenBracket
+			'[' => match {self.eat(); self.peek()} {
+				Some('=' | '[') => self.parse_bracketed_string().map(Ok),
+				_ => Some(Ok(Token::OpenBracket))
 			},
 
 			// Single character token Other Assign (=)
 			// OR Double character token Relational Equal (==)
-			'=' => match {self.eat(); self.peek().unwrap()} {
-				'=' => {self.eat(); Token::Equal},
-				_ => Token::Assign
+			'=' => match {self.eat(); self.peek()} {
+				Some('=') => {self.eat(); Some(Ok(Token::Equal))},
+				_ => Some(Ok(Token::Assign))
 			},
 
 			// Single character token Relational LessThan (<)
 			// OR Double character token Relational LessThanOrEqual (<=)
 			// OR Double character token Bitwise ShiftLeft (<<)
-			'<' => match {self.eat(); self.peek().unwrap()} {
-				'=' => {self.eat(); Token::LessThanOrEqual},
-				'<' => {self.eat(); Token::ShiftLeft},
-				_ => Token::LessThan
+			'<' => match {self.eat(); self.peek()} {
+				Some('=') => {self.eat(); Some(Ok(Token::LessThanOrEqual))},
+				Some('<') => {self.eat(); Some(Ok(Token::ShiftLeft))},
+				_ => Some(Ok(Token::LessThan))
 			},
 
 			// Single character token Relational GreaterThan (>)
 			// OR Double character token Relational GreaterThanOrEqual (>=)
 			// OR Double character token Bitwise ShiftRight (>>)
-			'>' => match {self.eat(); self.peek().unwrap()} {
-				'=' => {self.eat(); Token::GreaterThanOrEqual},
-				'>' => {self.eat(); Token::ShiftRight},
-				_ => Token::GreaterThan
+			'>' => match {self.eat(); self.peek()} {
+				Some('=') => {self.eat(); Some(Ok(Token::GreaterThanOrEqual))},
+				Some('>') => {self.eat(); Some(Ok(Token::ShiftRight))},
+				_ => Some(Ok(Token::GreaterThan))
 			},
 
 			// Single character token Bitwise BitwiseNotOrXOr (~)
 			// OR Double character token Relational NotEqual (~=)
-			'~' => match {self.eat(); self.peek().unwrap()} {
-				'=' => {self.eat(); Token::NotEqual},
-				_ => Token::BitwiseNotOrXOr
+			'~' => match {self.eat(); self.peek()} {
+				Some('=') => {self.eat(); Some(Ok(Token::NotEqual))},
+				_ => Some(Ok(Token::BitwiseNotOrXOr))
 			},
 
 			// Single character token Arithmetic Divide (/)
 			// OR Double character token Arithmetic FloorDivide (//)
-			'/' => match {self.eat(); self.peek().unwrap()} {
-				'/' => {self.eat(); Token::FloorDivide},
-				_ => Token::FloorDivide
+			'/' => match {self.eat(); self.peek()} {
+				Some('/') => {self.eat(); Some(Ok(Token::FloorDivide))},
+				_ => Some(Ok(Token::FloorDivide))
 			},
 
 			// Single character token Other Period (.)
 			// OR Double character token Other Concat (..)
 			//   OR Triple character token Other VarArgs (...) // TODO
-			'.' => match {self.eat(); self.peek().unwrap()} {
-				'.' => {self.eat(); Token::Concat},
-				_ => Token::Period
+			'.' => match {self.eat(); self.peek()} {
+				Some('.') => {self.eat(); Some(Ok(Token::Concat))},
+				_ => Some(Ok(Token::Period))
 			},
 
 			// Arithmetic
-			'+' => {self.eat(); Token::Add},
+			'+' => {self.eat(); Some(Ok(Token::Add))},
 			// Minus is a complex token
-			'*' => {self.eat(); Token::Multiply},
+			'*' => {self.eat(); Some(Ok(Token::Multiply))},
 			// Divide and FloorDivide are complex tokens
-			'%' => {self.eat(); Token::Modulo},
-			'^' => {self.eat(); Token::Exponent},
+			'%' => {self.eat(); Some(Ok(Token::Modulo))},
+			'^' => {self.eat(); Some(Ok(Token::Exponent))},
 
 			// Bitwise
-			'&' => {self.eat(); Token::BitwiseAnd},
-			'|' => {self.eat(); Token::BitwiseOr},
+			'&' => {self.eat(); Some(Ok(Token::BitwiseAnd))},
+			'|' => {self.eat(); Some(Ok(Token::BitwiseOr))},
 			// BitwiseNotOrXOr, ShiftLeft and ShiftRight are complex tokens
 
 			// Relational
@@ -507,27 +515,30 @@ impl<T> Iterator for Lexer<T>
 
 			// Other
 			// Other Assign is a complex token
-			':' => {self.eat(); Token::Colon},
-			',' => {self.eat(); Token::Comma},
+			':' => {self.eat(); Some(Ok(Token::Colon))},
+			',' => {self.eat(); Some(Ok(Token::Comma))},
 			// Other Period is a complex token
-			';' => {self.eat(); Token::SemiColon},
+			';' => {self.eat(); Some(Ok(Token::SemiColon))},
 			// Other Concat is a complex token
-			'#' => {self.eat(); Token::Length},
+			'#' => {self.eat(); Some(Ok(Token::Length))},
 
 			// Sectioning
-			'(' => {self.eat(); Token::OpenParen},
-			')' => {self.eat(); Token::CloseParen},
-			'{' => {self.eat(); Token::OpenCurly},
-			'}' => {self.eat(); Token::CloseCurly},
+			'(' => {self.eat(); Some(Ok(Token::OpenParen))},
+			')' => {self.eat(); Some(Ok(Token::CloseParen))},
+			'{' => {self.eat(); Some(Ok(Token::OpenCurly))},
+			'}' => {self.eat(); Some(Ok(Token::CloseCurly))},
 			// Sectioning OpenBracket is a complex token
-			']' => {self.eat(); Token::CloseBracket},
+			']' => {self.eat(); Some(Ok(Token::CloseBracket))},
 
 			// Literals
-			'"' => self.parse_string().unwrap(), // Double quoted strings
-			'\'' => self.parse_string().unwrap(), // Single quoted strings
-			'0'..='9' => self.parse_number().unwrap(), // Numbers
-			_ => self.parse_identifier().unwrap() // Most other literals
-		})
+			'"' => self.parse_string(), // Double quoted strings
+			'\'' => self.parse_string(), // Single quoted strings
+			'0'..='9' => Some(self.parse_number()), // Numbers
+			// Most other literals
+			'a'..='z' | 'A'..='Z' | '_' => Some(Ok(self.parse_identifier())),
+
+			character => Some(Err(Error::UnexpectedCharacter(character)))
+		}
 	}
 
 	/// Returns the bounds on the remaining length of the lexer.
