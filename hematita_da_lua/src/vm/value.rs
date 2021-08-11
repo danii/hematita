@@ -150,12 +150,12 @@ macro_rules! lua_tuple_inner {
 	($value:expr) => {$value}
 }
 
-pub trait UserData {
+pub trait UserData: Send + Sync {
 	fn type_name(&self) -> &'static str;
 }
 
-pub type NativeFunction<'n> = &'n dyn Fn(Arc<Table<'n>>, &VirtualMachine<'n>)
-	-> Result<Arc<Table<'n>>, String>;
+pub type NativeFunction<'n> = &'n (dyn Fn(Arc<Table<'n>>, &VirtualMachine<'n>)
+	-> Result<Arc<Table<'n>>, String> + Send + Sync);
 
 /// Represents a lua value.
 // TODO: Add floats.
