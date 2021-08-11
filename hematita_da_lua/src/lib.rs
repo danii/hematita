@@ -16,9 +16,9 @@
 )]
 //! Hematita Da Lua is an interpreter for the scripting language Lua, written
 //! entirely in 100% safe Rust. Hematita is the portugese word for hematite, a
-//! type of iron oxide, or rust, and lua is the portugese word for moon. 'Lua
-//! Hematita' is a pin on what this project is, and the discovery that [iron on
-//! the moon is rusting][moon-rust].
+//! type of iron oxide, or rust, and lua is the portugese word for moon.
+//! 'Hematita Da Lua' is a pin on what this project is, and the discovery that
+//! [iron on the moon is rusting][moon-rust].
 //!
 //! This project is made of four primary components, each one more complicated
 //! than the last.
@@ -35,10 +35,10 @@
 //! Examples
 //! --------
 //! Executing Lua source text is fairly straight forward, and only requires
-//! stringing together each component.
+//! stringing together each segment of the interpreter.
 //! ```rust
-//! use hematita_da_lua::{ast::{lexer, parser}, compiler, vm, lua_lib};
-//!
+//! use hematita_da_lua::{ast::{lexer, parser}, compiler, vm, lua_lib, lua_tuple};
+//! 
 //! // Ready our Lua source code.
 //! let source = "print(\"Hello, World!\")";
 //! // Create a lexer (just a token iterator) from the characters of our source
@@ -49,15 +49,12 @@
 //! // Compile bytecode from the block of statements.
 //! let compiled = compiler::compile_block(&parsed);
 //!
-//! // Running the bytecode is slightly more involved, as we have to prepare a
-//! // global scope for the virtual machine, and arguments for our code. It's
-//! // not that hard though.
+//! // Prepare the global scope.
 //! let global = lua_lib::standard_globals();
-//! let arguments = vm::value::Table::default().arc();
 //! // Create the virtual machine...
 //! let virtual_machine = vm::VirtualMachine::new(global);
-//! // And run the bytecode.
-//! virtual_machine.execute(&compiled.into(), arguments).unwrap();
+//! // And run the byte code.
+//! virtual_machine.execute(&compiled.into(), lua_tuple![].arc()).unwrap();
 //! ```
 //! Note that the `arguments` argument in [VirtualMachine::execute][vm-execute]
 //! go unused for bytecode generated from [compile][compiler-compile], as top

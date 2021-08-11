@@ -117,7 +117,10 @@ macro_rules! lua_tuple {
 	($($arm:tt)*) => {{
 		#[allow(unused_assignments, unused_mut, unused_variables, unused_imports)]
 		{
-			use $crate::{vm::value::{Table, Value}, lua_tuple_inner, lua_value};
+			use $crate::{
+				vm::value::{IntoNillable, Nillable::NonNil, Table, Value},
+				lua_tuple_inner, lua_value
+			};
 			use hashbrown::HashMap;
 			use std::{default::Default, sync::Mutex};
 
