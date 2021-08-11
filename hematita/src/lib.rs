@@ -37,7 +37,7 @@
 //! Executing Lua source text is fairly straight forward, and only requires
 //! stringing together each segment of the interpreter.
 //! ```rust
-//! use hematita_da_lua::{ast::{lexer, parser}, compiler, vm, lua_lib, lua_tuple};
+//! use hematita::{ast::{lexer, parser}, compiler, vm, lua_lib, lua_tuple};
 //! 
 //! // Ready our Lua source code.
 //! let source = "print(\"Hello, World!\")";

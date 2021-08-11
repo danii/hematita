@@ -38,7 +38,7 @@ impl Display for Error {
 /// --------
 /// Below is an example of parsing one line of Lua.
 /// ```rust
-/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+/// # use hematita::ast::lexer::{Lexer, Token};
 /// let mut lexer = Lexer {source: "print('hello world!')".chars().peekable()};
 ///
 /// assert_eq!(lexer.next(), Some(Ok(Token::Identifier("print".to_owned()))));
@@ -64,7 +64,7 @@ impl<T> Lexer<T>
 	/// Below is the typical use case for this function.
 	//  FIXME: https://github.com/rust-lang/rust/issues/67295
 	/// ```ignore
-	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use hematita::ast::lexer::{Lexer, Token};
 	/// # fn allow_return() -> Result<Token, ()> {
 	/// # 	let mut lexer = Lexer {source: "(".chars().peekable()};
 	/// // The expected type of this match statement is a unit. Calling
@@ -91,7 +91,7 @@ impl<T> Lexer<T>
 	/// Below is the typical use case for this function.
 	//  FIXME: https://github.com/rust-lang/rust/issues/67295
 	/// ```ignore
-	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use hematita::ast::lexer::{Lexer, Token};
 	/// let mut lexer = Lexer {source: "hello".chars().peekable()};
 	///
 	/// assert_eq!(lexer.next(), Some('h'));
@@ -111,7 +111,7 @@ impl<T> Lexer<T>
 	/// Below is the typical use case for this function.
 	//  FIXME: https://github.com/rust-lang/rust/issues/67295
 	/// ```ignore
-	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use hematita::ast::lexer::{Lexer, Token};
 	/// # use std::mem::drop as consume;
 	/// let mut lexer = Lexer {source: "hi".chars().peekable()};
 	///
@@ -124,7 +124,7 @@ impl<T> Lexer<T>
 	/// Below is an example of misuse of this function.
 	//  FIXME: https://github.com/rust-lang/rust/issues/67295
 	/// ```should_panic,ignore
-	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use hematita::ast::lexer::{Lexer, Token};
 	/// # use std::mem::drop as consume;
 	/// let mut lexer = Lexer {source: "".chars().peekable()};
 	///
@@ -149,7 +149,7 @@ impl<T> Lexer<T>
 	/// Below is the typical use case for this function.
 	//  FIXME: https://github.com/rust-lang/rust/issues/67295
 	/// ```ignore
-	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use hematita::ast::lexer::{Lexer, Token};
 	/// let mut lexer = Lexer {source: "hello".chars().peekable()};
 	///
 	/// assert_eq!(lexer.peek(), Some('h'));
@@ -170,7 +170,7 @@ impl<T> Lexer<T>
 	/// Below is the typical use case for this function.
 	//  FIXME: https://github.com/rust-lang/rust/issues/67295
 	/// ```ignore
-	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use hematita::ast::lexer::{Lexer, Token};
 	/// let mut lexer = Lexer {source: "a b    cd".chars().peekable()};
 	///
 	/// assert_eq!(iter.parse_whitespace(), Some('a'));
@@ -198,7 +198,7 @@ impl<T> Lexer<T>
 	/// Below is the typical use case for this function.
 	//  FIXME: https://github.com/rust-lang/rust/issues/67295
 	/// ```ignore
-	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use hematita::ast::lexer::{Lexer, Token};
 	/// let mut lexer = Lexer {source: "hi if end ok".chars().peekable()};
 	///
 	/// assert_eq!(lexer.parse_identifier(),
@@ -253,7 +253,7 @@ impl<T> Lexer<T>
 	/// Below is the typical use case for this function.
 	//  FIXME: https://github.com/rust-lang/rust/issues/67295
 	/// ```ignore
-	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use hematita::ast::lexer::{Lexer, Token};
 	/// let mut lexer = Lexer {source: "'hi\\n'".chars().peekable()};
 	///
 	/// assert_eq!(lexer.parse_string(),
@@ -295,7 +295,7 @@ impl<T> Lexer<T>
 	/// -------
 	//  FIXME: https://github.com/rust-lang/rust/issues/67295
 	/// ```ignore
-	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use hematita::ast::lexer::{Lexer, Token};
 	/// let mut lexer = Lexer {source: "[[hi\\n]]".chars().peekable()};
 	///
 	/// assert_eq!(lexer.next(), Some('['));
@@ -314,7 +314,7 @@ impl<T> Lexer<T>
 	/// -------
 	//  FIXME: https://github.com/rust-lang/rust/issues/67295
 	/// ```ignore
-	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use hematita::ast::lexer::{Lexer, Token};
 	/// let mut lexer = Lexer {source: "123".chars().peekable()};
 	///
 	/// assert_eq!(lexer.parse_number(), Some(Token::Integer(123)));
@@ -336,7 +336,7 @@ impl<T> Lexer<T>
 	/// -------
 	//  FIXME: https://github.com/rust-lang/rust/issues/67295
 	/// ```ignore
-	/// # use hematita_da_lua::ast::lexer::{Lexer, Token};
+	/// # use hematita::ast::lexer::{Lexer, Token};
 	/// let mut lexer = Lexer {source: "-- comment!".chars().peekable()};
 	///
 	/// assert_eq!(lexer.next(), Some('-'));

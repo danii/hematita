@@ -1,5 +1,5 @@
 use self::super::{compile, compile_expression, handle_io};
-use hematita_da_lua::{
+use hematita::{
 	ast::{parser::Error as ParserError, Error},
 	lua_lib::print,
 	vm::{VirtualMachine, value::{Nillable::{Nil, NonNil}, Table, Value}}

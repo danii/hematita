@@ -6,7 +6,7 @@ use self::{
 	repl::repl
 };
 use std::{convert::TryFrom, io::Error as IOError, process::exit};
-use hematita_da_lua::{
+use hematita::{
 	ast::{
 		lexer::Lexer,
 		parser::{

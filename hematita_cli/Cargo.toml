@@ -1,9 +1,9 @@
 [package]
-name = "hematita_da_lua_cli"
+name = "hematita_cli"
 version = "0.1.0"
 edition = "2018"
 authors = ["Daniel Conley <himself@danii.dev>"]
 
 [dependencies]
-hematita_da_lua = {path = "../hematita_da_lua"}
+hematita = {path = "../hematita"}
 pico-args = {version = "0.4.2", features = ["combined-flags"]}

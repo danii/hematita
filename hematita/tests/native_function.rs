@@ -1,4 +1,4 @@
-use hematita_da_lua::{
+use hematita::{
 	ast::{lexer::Lexer, parser::{TokenIterator, parse_block}},
 	compiler::compile_block, lua_lib::standard_globals,
 	vm::{value::Value, VirtualMachine},

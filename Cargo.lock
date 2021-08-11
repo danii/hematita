@@ -52,7 +52,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "hematita_da_lua"
+name = "hematita"
 version = "0.1.0"
 dependencies = [
  "diff",
@@ -62,10 +62,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "hematita_da_lua_cli"
+name = "hematita_cli"
 version = "0.1.0"
 dependencies = [
- "hematita_da_lua",
+ "hematita",
  "pico-args",
 ]
 
