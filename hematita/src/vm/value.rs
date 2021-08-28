@@ -60,7 +60,7 @@ macro_rules! nillable_conversions {
 #[macro_export]
 macro_rules! lua_value {
 	($raw:literal) => {$crate::vm::value::Value::from($raw)};
-	($($other:tt)*) => {Value::Table(lua_table! {$($other)*}.arc())}
+	($($other:tt)*) => {$crate::vm::value::Value::Table(lua_table! {$($other)*}.arc())}
 }
 
 #[macro_export]
@@ -68,7 +68,10 @@ macro_rules! lua_table {
 	($($arm:tt)*) => {{
 		#[allow(unused_assignments, unused_mut, unused_variables, unused_imports)]
 		{
-			use $crate::{vm::value::{Table, Value}, lua_table_inner, lua_value};
+			use $crate::{
+				vm::value::{IntoNillable, Nillable::NonNil, Table, Value},
+				lua_table_inner, lua_value
+			};
 			use hashbrown::HashMap;
 			use std::{default::Default, sync::Mutex};
 
@@ -86,21 +89,30 @@ macro_rules! lua_table {
 macro_rules! lua_table_inner {
 	($table:ident $counter:ident {[$key:expr] = $value:expr $(, $($rest:tt)*)?}) => {
 		{
-			$table.insert(lua_table_inner!($key), lua_table_inner!($value));
+			if let NonNil(value) = IntoNillable::nillable(lua_table_inner!($value).clone()) {
+				match IntoNillable::nillable(lua_table_inner!($key).clone()) {
+					NonNil(key) => $table.insert(key, value),
+					_ => panic!("attempt to use a nil value as a key in lua_table macro")
+				};
+			}
 		}
 
 		lua_table_inner!($table $counter {$($($rest)*)?});
 	};
 	($table:ident $counter:ident {$key:ident = $value:expr $(, $($rest:tt)*)?}) => {
 		{
-			$table.insert(Value::from(stringify!($key)), lua_table_inner!($value));
+			if let NonNil(value) = IntoNillable::nillable(lua_table_inner!($value).clone()) {
+				$table.insert(Value::from(stringify!($key)), value);
+			}
 		}
 
 		lua_table_inner!($table $counter {$($($rest)*)?});
 	};
 	($table:ident $counter:ident {$value:expr $(, $($rest:tt)*)?}) => {
 		{
-			$table.insert(Value::from($counter), lua_table_inner!($value));
+			if let NonNil(value) = IntoNillable::nillable(lua_table_inner!($value).clone()) {
+				$table.insert(Value::from($counter), value);
+			}
 			$counter += 1;
 		}
 
@@ -639,5 +651,129 @@ impl Display for Function<'_> {
 impl From<Chunk> for Function<'_> {
 	fn from(chunk: Chunk) -> Self {
 		Self {chunk: chunk.arc(), up_values: vec![].into_boxed_slice()}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use self::super::{Function, Table, Value};
+	use hashbrown::HashMap;
+	use std::{hash::{BuildHasher, Hash, Hasher}, ptr::eq as ptr_eq, sync::Mutex};
+
+	macro_rules! assert_table_eq {
+		($left:expr, $right:expr) => {{
+			let left = $left;
+			let right = $right;
+			if !table_matches(&left, &right) {
+				panic!("left != right\nleft: {:?}\nright: {:?}", &left, &right)
+			}
+		}}
+	}
+
+	macro_rules! assert_value_eq {
+		($left:expr, $right:expr) => {{
+			let left = $left;
+			let right = $right;
+			if !value_matches(&left, &right) {
+				panic!("left != right\nleft: {:?}\nright: {:?}", &left, &right)
+			}
+		}}
+	}
+
+	fn unrelated_get<'m, 'qn, 'n>(map: &'m HashMap<Value<'n>, Value<'n>>,
+			index: &Value<'qn>) -> Option<&'m Value<'n>> {
+		let mut hasher = map.hasher().build_hasher();
+		index.hash(&mut hasher);
+		map.raw_entry().from_hash(hasher.finish(), |check| index == check)
+			.map(|(_, value)| value)
+	}
+
+	fn value_matches(a: &Value, b: &Value) -> bool {
+		match (a, b) {
+			(Value::Integer(a), Value::Integer(b)) =>
+				a == b,
+			(Value::String(a), Value::String(b)) =>
+				a == b,
+			(Value::Boolean(a), Value::Boolean(b)) =>
+				a == b,
+			(Value::Table(a), Value::Table(b)) =>
+				table_matches(a, b),
+			(Value::UserData {data: data_a, meta: Some(meta_a)},
+					Value::UserData {data: data_b, meta: Some(meta_b)}) =>
+				ptr_eq(data_a, data_b) && table_matches(meta_a, meta_b),
+			(Value::UserData {data: data_a, meta: None},
+					Value::UserData {data: data_b, meta: None}) =>
+				ptr_eq(data_a, data_b),
+			(Value::Function(a), Value::Function(b)) =>
+				function_matches(a, b),
+			(Value::NativeFunction(a), Value::NativeFunction(b)) =>
+				ptr_eq(*a as *const _ as *const u8, *b as *const _ as *const u8),
+			_ => false
+		}
+	}
+
+	fn table_matches(a: &Table, b: &Table) -> bool {
+		let Table {data: data_a, metatable: meta_a} = a;
+		let Table {data: data_b, metatable: meta_b} = b;
+		let (data_a, meta_a) = (data_a.lock().unwrap(), meta_a.lock().unwrap());
+		let (data_b, meta_b) = (data_b.lock().unwrap(), meta_b.lock().unwrap());
+
+		data_a.len() == data_b.len() &&
+			data_a.iter().all(|(key, a)| match unrelated_get(&data_b, key) {
+				Some(b) => value_matches(a, b),
+				None => false
+			}) &&
+			match (&*meta_a, &*meta_b) {
+				(Some(a), Some(b)) => table_matches(a, b),
+				(None, None) => true,
+				_ => false
+			}
+	}
+
+	fn function_matches(_: &Function, _: &Function) -> bool {
+		false
+	}
+
+	#[test]
+	fn test_lua_value_literal() {
+		assert_eq!(lua_value!(12), Value::Integer(12));
+		assert_eq!(lua_value!("epic sauce"), Value::String("epic sauce".into()));
+		assert_eq!(lua_value!(true), Value::Boolean(true));
+	}
+
+	#[test]
+	fn test_lua_value_table() {
+		let raw_string = "this is a string i think";
+		let string = Value::String("this is in a quantum state of being a string, and being an enum".into());
+		let raw_value = true;
+		let value = Value::Boolean(false);
+
+		assert_value_eq!(
+			lua_value! {1, "hello", item = true, [raw_string] = value, 9,
+				[string] = raw_value, 4},
+			Value::Table(lua_table! {1, "hello", item = true, [raw_string] = value, 9,
+				[string] = raw_value, 4}.arc())
+		)
+	}
+
+	#[test]
+	fn test_lua_tuple() {
+		let raw_bool = true;
+		let bool = Value::Boolean(false);
+		let function = Value::NativeFunction(&|args, _: &_| Ok(args));
+
+		assert_table_eq!(
+			{
+				let mut data = HashMap::new();
+				data.insert(Value::Integer(0), Value::Integer(5));
+				data.insert(Value::Integer(1), Value::Integer(8));
+				data.insert(Value::Integer(2), Value::Boolean(raw_bool));
+				data.insert(Value::Integer(3), Value::String("hello".into()));
+				data.insert(Value::Integer(4), bool.clone());
+				data.insert(Value::Integer(5), function.clone());
+				Table {data: Mutex::new(data), ..Default::default()}
+			},
+			lua_tuple![8, raw_bool, "hello", bool, function]
+		)
 	}
 }
