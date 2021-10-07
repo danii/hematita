@@ -324,8 +324,7 @@ impl<T> Lexer<T>
 		let mut number = String::new();
 		while let Some('0'..='9') = self.peek()
 			{number.push(self.peeked_next())}
-		number.parse()
-			.map(|number| Token::Integer(number))
+		number.parse().map(Token::Integer)
 			.map_err(|_| Error::NumberTooLarge(number.into_boxed_str()))
 	}
 

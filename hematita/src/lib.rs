@@ -14,6 +14,14 @@
 	clippy::todo,
 	clippy::unimplemented
 )]
+#![allow(
+	// Rationale: Tabs are superior, don't at me.
+	clippy::tabs_in_doc_comments,
+
+	// Rationale: Drop is a valid way to ensure an expression returns a unit. It
+	// can be used like JavaScript's void keyword.
+	clippy::drop_copy
+)]
 //! Hematita Da Lua is an interpreter for the scripting language Lua, written
 //! entirely in 100% safe Rust. Hematita is the portugese word for hematite, a
 //! type of iron oxide, or rust, and lua is the portugese word for moon.

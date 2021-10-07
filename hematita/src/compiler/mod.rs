@@ -341,15 +341,17 @@ impl Generator {
 				// Assignment
 
 				Statement::Assign {variables, values} => {
-					let mut variables = once(&variables.0).chain(variables.1.iter());
+					let variables = once(&variables.0).chain(variables.1.iter());
 					let mut names = Vec::new();
+					#[allow(clippy::needless_collect)]
 					let mut value = {
+						// TODO: This is kind of inneficient? Is there not an easier way?
 						let values: Vec<_> = values.iter()
 							.map(|value| self.compile_expression(value)).collect();
 						iter_tuple(values.into_iter())
 					};
 
-					while let Some(target) = variables.next() {
+					for target in variables {
 							match (target, value(self)) {
 						(AssignmentTarget::Identifier(identifier),
 								CompileResult::Evaluated(value)) => match (
@@ -435,15 +437,16 @@ impl Generator {
 				},
 
 				Statement::LocalAssign {variables, values} => {
-					let mut variables = once(&variables.0).chain(variables.1.iter());
+					let variables = once(&variables.0).chain(variables.1.iter());
 					let mut names = Vec::new();
+					#[allow(clippy::needless_collect)] // TODO: Same as in Assign.
 					let mut value = {
 						let values: Vec<_> = values.iter()
 							.map(|value| self.compile_expression(value)).collect();
 						iter_tuple(values.into_iter())
 					};
 
-					while let Some(name) = variables.next() {match value(self) {
+					for name in variables {match value(self) {
 						CompileResult::Evaluated(value) => {
 							// We don't have to assign this variable immediately, because
 							// it's known.
@@ -883,7 +886,7 @@ impl Generator {
 
 	fn prepare_side_effects(&mut self) {
 		// We need to realize all values...
-		#[allow(clippy::needless_collect)] // Needed by borrow checker.
+		#[allow(clippy::needless_collect)] // TODO: Needed by borrow checker.
 		let evaluated = self.evaluated_variables.iter()
 			.map(|(name, value)| (name.clone(), value.clone()))
 			.collect::<Vec<_>>();
@@ -909,8 +912,12 @@ impl Default for Generator {
 	}
 }
 
-fn iter_tuple<I>(values: I) -> impl FnMut(&mut Generator) -> CompileResult
-		where I: ExactSizeIterator<Item = CompileResult> {
+// TODO: Refactor the Generator struct so we don't have to do this crazy
+//       nonsense? Maybe this function's return value uses completely different
+//       fields than the code that uses this function. Maybe.
+// What does this function even do anyway?
+fn iter_tuple<'i, I>(values: I) -> impl FnMut(&mut Generator) -> CompileResult + 'i
+		where I: ExactSizeIterator<Item = CompileResult> + 'i {
 	enum State<I>
 			where I: ExactSizeIterator<Item = CompileResult> {
 		Values(I),

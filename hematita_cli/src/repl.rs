@@ -6,7 +6,7 @@ use hematita::{
 };
 use std::io::{BufRead, Write, stdin, stdout};
 
-pub fn repl<'n>(vm: VirtualMachine<'n>) {
+pub fn repl(vm: VirtualMachine) {
 	loop {
 		let mut code = String::new();
 

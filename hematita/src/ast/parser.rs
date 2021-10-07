@@ -734,8 +734,8 @@ pub fn parse_while<I>(iter: &mut TokenIterator<I>) -> Result<Statement>
 	})
 }
 
-fn parse_tuple<'i, I>(iter: &'i mut TokenIterator<I>)
-		-> impl Iterator<Item = Result<String>> + 'i
+fn parse_tuple<I>(iter: &mut TokenIterator<I>)
+		-> impl Iterator<Item = Result<String>> + '_
 			where I: Iterator<Item = LexerResult<Token>> {
 	let mut first = true;
 	from_fn(move || match iter.peek().transpose() {
