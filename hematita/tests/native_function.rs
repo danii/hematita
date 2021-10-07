@@ -6,6 +6,7 @@ use hematita::{
 };
 use std::sync::Mutex;
 
+#[test]
 fn main() {
 	let source = "counter() counter() counter()";
 	let lexer = Lexer {source: source.chars().peekable()}.peekable();
