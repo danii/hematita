@@ -134,25 +134,36 @@ struct StackFrame<'v, 'f, 'n> {
 }
 
 impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
+	/// Panics
+	/// ------
+	/// Panics if any encountered lock is poisoned.
 	fn reference<'s>(&self, reference: impl Into<Reference<'s>>)
 			-> Nillable<'n> {
 		match reference.into() {
 			Reference::Global(name) => {
-				let global = self.virtual_machine.global.data.lock().unwrap();
+				// TODO: Return this error? Like value.rs, there are a lot more of
+				// these. (Breaking change.)
+				let global = self.virtual_machine.global.data.lock()
+					.expect("poison error");
 				global.get(&Value::new_string(name)).nillable()
 			},
 			Reference::Local(id) => match &self.registers[id] {
 				MaybeUpValue::Normal(value) => value.clone(),
-				MaybeUpValue::UpValue(value) => value.lock().unwrap().clone()
+				MaybeUpValue::UpValue(value) => value.lock()
+					.expect("poison error").clone()
 			}
 		}
 	}
 
+	/// Panics
+	/// ------
+	/// Panics if any encountered lock is poisoned.
 	fn write_reference<'s>(&mut self, reference: impl Into<Reference<'s>>,
 			value: Nillable<'n>) {
 		match reference.into() {
 			Reference::Global(name) => {
-				let mut global = self.virtual_machine.global.data.lock().unwrap();
+				let mut global = self.virtual_machine.global.data.lock()
+					.expect("poison error");
 
 				match value {
 					NonNil(value) => global.insert(Value::new_string(name), value),
@@ -163,11 +174,14 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 				MaybeUpValue::Normal(destination) =>
 					*destination = value,
 				MaybeUpValue::UpValue(destination) =>
-					*destination.lock().unwrap() = value
+					*destination.lock().expect("poison error") = value
 			}
 		}
 	}
 
+	/// Panics
+	/// ------
+	/// Panics if any encountered lock is poisoned.
 	fn meta_method(&self, object: &Nillable<'n>, method: &str)
 			-> Nillable<'n> {
 		match object {
@@ -177,7 +191,7 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 					None => return Nil
 				};
 
-				let meta = meta.data.lock().unwrap();
+				let meta = meta.data.lock().expect("poison error");
 				meta.get(&Value::new_string(method)).nillable()
 			},
 			NonNil(Value::String(_)) => {
@@ -186,7 +200,7 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 					None => return Nil
 				};
 
-				let meta = meta.data.lock().unwrap();
+				let meta = meta.data.lock().expect("poison error");
 				meta.get(&Value::new_string(method)).nillable()
 			},
 			NonNil(Value::Boolean(_)) => {
@@ -195,7 +209,7 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 					None => return Nil
 				};
 
-				let meta = meta.data.lock().unwrap();
+				let meta = meta.data.lock().expect("poison error");
 				meta.get(&Value::new_string(method)).nillable()
 			},
 			NonNil(Value::Function(_)) | NonNil(Value::NativeFunction(_)) => {
@@ -204,19 +218,20 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 					None => return Nil
 				};
 
-				let meta = meta.data.lock().unwrap();
+				let meta = meta.data.lock().expect("poison error");
 				meta.get(&Value::new_string(method)).nillable()
 			},
-			NonNil(Value::Table(table)) => match &*table.metatable.lock().unwrap() {
+			NonNil(Value::Table(table)) => match &*table.metatable
+					.lock().expect("poison error") {
 				Some(meta) => {
-					let meta = meta.data.lock().unwrap();
+					let meta = meta.data.lock().expect("poison error");
 					meta.get(&Value::new_string(method)).nillable()
 				},
 				None => Nil
 			},
 			NonNil(Value::UserData {meta, ..}) => match meta {
 				Some(meta) => {
-					let meta = meta.data.lock().unwrap();
+					let meta = meta.data.lock().expect("poison error");
 					meta.get(&Value::new_string(method)).nillable()
 				},
 				None => Nil
@@ -244,7 +259,11 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 		}
 	}
 
-	fn execute(&mut self, arguments: Arc<Table<'n>>) -> Result<Arc<Table<'n>>, String> {
+	/// Panics
+	/// ------
+	/// Panics if any encountered lock is poisoned.
+	fn execute(&mut self, arguments: Arc<Table<'n>>)
+			-> Result<Arc<Table<'n>>, String> {
 		// Set arguments.
 		self.registers[0] = MaybeUpValue::Normal(NonNil(Value::Table(arguments)));
 
@@ -282,7 +301,7 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 							Nil => break Err("table index is nil".to_owned())
 						};
 		
-						let mut table = table.data.lock().unwrap();
+						let mut table = table.data.lock().expect("poison error");
 						match self.reference(value) {
 							NonNil(value) => table.insert(index, value),
 							Nil => table.remove(&index)
@@ -467,7 +486,7 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 						result.index(&Value::Integer(1))
 					},
 					(NonNil(Value::Table(operand)), UnaryOperation::Length) => {
-						let operand = operand.data.lock().unwrap();
+						let operand = operand.data.lock().expect("poison error");
 						// NOTE: This is not what the main lua implementation does, but it
 						// is valid, as the spec says the length operator may return *any
 						// border*. The table length operator in lua just may not always
@@ -507,7 +526,7 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 					Some(&MaybeUpValue::Normal(ref value)) =>
 						return Err(format!("attempt to return a {} value", value.type_name())),
 					Some(&MaybeUpValue::UpValue(ref value)) =>
-							match &*value.lock().unwrap() {
+							match &*value.lock().expect("poison error") {
 						NonNil(Value::Table(result)) => return Ok(result.clone()),
 						value => return Err(format!("attempt to return a {} value", value.type_name()))
 					},
@@ -552,17 +571,19 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 
 				OpCode::LoadUpValue {register, up_value} => {
 					// TODO: Error handling.
-					let up_value = self.function.up_values[up_value].lock().unwrap();
+					let up_value = self.function.up_values[up_value]
+						.lock().expect("poison error");
 					self.registers[register] = MaybeUpValue::Normal(up_value.clone());
 				},
 
 				OpCode::SaveUpValue {up_value, register} => {
 					// TODO: Error handling.
-					let mut up_value = self.function.up_values[up_value].lock().unwrap();
+					let mut up_value = self.function.up_values[up_value]
+						.lock().expect("poison error");
 					*up_value = match self.registers[register] {
 						MaybeUpValue::Normal(ref value) => value.clone(),
 						MaybeUpValue::UpValue(ref value) => {
-							value.lock().unwrap().clone()
+							value.lock().expect("poison error").clone()
 						}
 					};
 				},
@@ -574,6 +595,9 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 		}
 	}
 
+	/// Panics
+	/// ------
+	/// Panics if any encountered lock is poisoned.
 	fn index_read(&mut self, indexee: Nillable<'n>,
 			index: Nillable<'n>, destination: usize) -> Result<(), String> {
 		enum IndexOperation<'n> {
@@ -585,7 +609,7 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 		// Triple match FTW
 		match match match (&indexee, &index) {
 			(NonNil(Value::Table(table)), NonNil(index)) => {
-				let data = table.data.lock().unwrap();
+				let data = table.data.lock().expect("poison error");
 				IndexOperation::Value(data.get(index).nillable())
 			},
 			(NonNil(Value::Table(_)), Nil) => IndexOperation::NilIndex,

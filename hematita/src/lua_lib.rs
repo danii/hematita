@@ -7,13 +7,17 @@ use self::super::{
 use itertools::Itertools;
 use std::{collections::HashMap, sync::Arc};
 
-pub fn table_to_vector<'n>(table: &Table<'n>) -> Vec<Nillable<'n>> {
-	let table = table.data.lock().unwrap();
-	let end = table.get(&Value::Integer(0)).unwrap().integer().unwrap();
+pub fn table_to_vector<'n>(table: &Table<'n>)
+		-> Result<Vec<Nillable<'n>>, String> {
+	let table = table.data.lock().map_err(|error| format!("{}", error))?;
+	let end = table.get(&Value::Integer(0)).and_then(Value::integer)
+		.ok_or_else(|| "call convention failure".to_string())?;
 
-	(1..=end)
-		.map(|index| table.get(&Value::Integer(index)).nillable())
-		.collect()
+	Ok(
+		(1..=end)
+			.map(|index| table.get(&Value::Integer(index)).nillable())
+			.collect()
+	)
 }
 
 pub fn vector_to_table(vector: Vec<Option<Value>>) -> HashMap<Value, Value> {
@@ -25,7 +29,7 @@ pub fn vector_to_table(vector: Vec<Option<Value>>) -> HashMap<Value, Value> {
 
 pub fn print<'n>(arguments: Arc<Table<'n>>, _: &VirtualMachine)
 		-> Result<Arc<Table<'n>>, String> {
-	let message = table_to_vector(&*arguments).into_iter()
+	let message = table_to_vector(&*arguments)?.into_iter()
 		.map(|argument| format!("{}", argument.nillable()))
 		.join("\t");
 	println!("{}", message);
@@ -60,7 +64,7 @@ pub fn error<'n>(arguments: Arc<Table<'n>>, _: &VirtualMachine<'n>)
 
 pub fn setmetatable<'n>(arguments: Arc<Table<'n>>, _: &VirtualMachine<'n>)
 		-> Result<Arc<Table<'n>>, String> {
-	let arguments = table_to_vector(&arguments);
+	let arguments = table_to_vector(&arguments)?;
 	let meta = match arguments.get(1) {
 		Some(NonNil(Value::Table(meta))) => meta.clone(),
 		_ => return Err("metatable error".to_owned())
@@ -68,7 +72,8 @@ pub fn setmetatable<'n>(arguments: Arc<Table<'n>>, _: &VirtualMachine<'n>)
 
 	match arguments.get(0) {
 		Some(NonNil(Value::Table(table))) => {
-			let mut table = table.metatable.lock().unwrap();
+			let mut table = table.metatable.lock()
+				.map_err(|error| format!("{}", error))?;
 			*table = Some(meta)
 		},
 		_ => return Err("metatable error".to_owned())
@@ -79,12 +84,13 @@ pub fn setmetatable<'n>(arguments: Arc<Table<'n>>, _: &VirtualMachine<'n>)
 
 pub fn getmetatable<'n>(arguments: Arc<Table<'n>>, _: &VirtualMachine<'n>)
 		-> Result<Arc<Table<'n>>, String> {
-	let arguments = table_to_vector(&arguments);
+	let arguments = table_to_vector(&arguments)?;
 	Ok(match arguments.get(0) {
-		Some(NonNil(Value::Table(table))) =>
-				match table.metatable.lock().unwrap().clone() {
+		Some(NonNil(Value::Table(table))) => match table.metatable.lock()
+				.map_err(|error| format!("{}", error))?.clone() {
 			Some(metatable) => {
-				let data = metatable.data.lock().unwrap();
+				let data = metatable.data.lock()
+					.map_err(|error| format!("{}", error))?;
 				match data.get(&Value::new_string("__metatable")) {
 					Some(fake) => lua_tuple![fake],
 					None => lua_tuple![&metatable]
@@ -112,7 +118,7 @@ pub fn standard_globals<'n>() -> Arc<Table<'n>> {
 	}.arc();
 
 	{
-		let mut data = globals.data.lock().unwrap();
+		let mut data = globals.data.lock().expect("unreachable");
 		data.insert(Value::new_string("_G"), Value::Table(globals.clone()));
 	}
 

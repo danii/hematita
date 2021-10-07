@@ -7,7 +7,7 @@ use std::{
 	convert::{TryFrom, TryInto},
 	error::Error as STDError,
 	fmt::{Display, Formatter, Result as FMTResult},
-	iter::{Peekable, from_fn}
+	iter::{Peekable, from_fn, once}
 };
 
 macro_rules! expression {
@@ -459,7 +459,7 @@ pub fn parse_expression_inner<I>(iter: &mut TokenIterator<I>, actor: Expression)
 				Ok(Some(Token::Comma)) => {iter.eat(); Some(parse_expression(iter))},
 				Ok(Some(Token::CloseParen)) => {iter.eat(); None},
 				Ok(_) => Some(Err(ASTError::Parser(Error(
-					iter.next().transpose().unwrap())))),
+					iter.next().transpose().expect("unreachable"))))),
 				Err(error) => Some(Err(ASTError::Lexer(error)))
 			}).try_collect()?;
 
@@ -509,7 +509,7 @@ pub fn parse_expression_inner<I>(iter: &mut TokenIterator<I>, actor: Expression)
 					Ok(Some(Token::Comma)) => {iter.eat(); Some(parse_expression(iter))},
 					Ok(Some(Token::CloseParen)) => {iter.eat(); None},
 					Ok(_) => Some(Err(ASTError::Parser(Error(
-						iter.next().transpose().unwrap())))),
+						iter.next().transpose().expect("unreachable"))))),
 					Err(error) => Some(Err(ASTError::Lexer(error)))
 				}).try_collect()?;
 
@@ -758,7 +758,7 @@ fn parse_tuple<I>(iter: &mut TokenIterator<I>)
 		},
 		Ok(Some(Token::CloseParen)) => {iter.eat(); None},
 		Ok(_) => Some(Err(ASTError::Parser(Error(
-			iter.next().transpose().unwrap())))),
+			iter.next().transpose().expect("unreachable"))))),
 		Err(error) => Some(Err(ASTError::Lexer(error)))
 	})
 }
@@ -954,9 +954,11 @@ impl Display for Statement {
 
 			Self::GenericFor {variable, iterator, r#do} =>
 				write!(f, "for {} in {} do\n{}end", variable, iterator, r#do),
+
 			Self::NumericFor {variable, first, limit, step, r#do} =>
 				write!(f, "for {} = {}, {}, {} do\n{}end", variable, first, limit,
 					step, r#do),
+
 			Self::While {condition, block, run_first: false} =>
 				write!(f, "while {} do\n{}end", condition, block),
 			Self::While {condition, block, run_first: true} =>
@@ -971,43 +973,89 @@ impl Display for Statement {
 			
 			// Assignment
 
-			Self::Assign {..} =>
-				todo!(),
-				/*if *local {write!(f, "local {} = {}", actor, value)}
-				else {write!(f, "{} = {}", actor, value)},*/
+			Self::Assign {variables, values} => {
+				once(&variables.0).chain(variables.1.iter())
+					.try_for_each(|variable| match variable {
+						AssignmentTarget::Identifier(identifier) =>
+							write!(f, "{}", identifier),
+						AssignmentTarget::Index {indexee, index} =>
+							write!(f, "{}[{}]", indexee, index)
+					})?;
+				if !values.is_empty() {write!(f, " = ")?}
+				values.iter().try_for_each(|value| write!(f, "{}", value))
+			},
+
+			Self::LocalAssign {variables, values} => {
+				write!(f, "local ")?;
+				once(&variables.0).chain(variables.1.iter())
+					.try_for_each(|variable| write!(f, "{}", variable))?;
+				if !values.is_empty() {write!(f, " = ")?}
+				values.iter().try_for_each(|value| write!(f, "{}", value))
+			},
 
 			// Expressions
 
 			Self::FunctionCall {function, arguments} => {
 				write!(f, "{}(", function)?;
-				arguments.iter().enumerate().try_for_each(|(index, expr)| {
-					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
-				})?;
+				arguments.iter().enumerate()
+					.try_for_each(|(index, expr)| {
+						if index == 0 {write!(f, "{}", expr)}
+						else {write!(f, ", {}", expr)}
+					})?;
 				write!(f, ")")
 			},
-			/*
-			Self::Function {name, arguments, body, method, local} => {
-				if *local {write!(f, "local ")?}
-				write!(f, "function ")?;
 
+			Self::MethodCall {class, method, arguments} => {
+				write!(f, "{}:{}(", class, method)?;
+				arguments.iter().enumerate()
+					.try_for_each(|(index, expr)| {
+						if index == 0 {write!(f, "{}", expr)}
+						else {write!(f, ", {}", expr)}
+					})?;
+				write!(f, ")")
+			},
+
+			Self::Function {name, arguments, body} => {
+				write!(f, "function ")?;
 				once(&name.0).chain(name.1.iter()).enumerate()
 					.try_for_each(|(index, part)| {
-						if index != 0 {
-							let seperator = if index == name.1.len() && *method {':'} else {'.'};
-							write!(f, "{}{}", seperator, part)
-						} else {
-							write!(f, "{}", part)
-						}
+						if index == 0 {write!(f, "{}", part)}
+						else {write!(f, ".{}", part)}
 					})?;
 				write!(f, "(")?;
-				arguments.iter().enumerate().try_for_each(|(index, expr)| {
-					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
-				})?;
-
+				arguments.iter().enumerate()
+					.try_for_each(|(index, expr)| {
+						if index == 0 {write!(f, "{}", expr)}
+						else {write!(f, ", {}", expr)}
+					})?;
 				write!(f, ")\n{}end", body)
-			},*/
+			},
 
-			_ => todo!()
+			Self::LocalFunction {name, arguments, body} => {
+				write!(f, "local function {}(", name)?;
+				arguments.iter().enumerate()
+					.try_for_each(|(index, expr)| {
+						if index == 0 {write!(f, "{}", expr)}
+						else {write!(f, ", {}", expr)}
+					})?;
+				write!(f, ")\n{}end", body)
+			},
+
+			Self::Method {class, name, arguments, body} => {
+				write!(f, "function ")?;
+				once(&class.0).chain(class.1.iter()).enumerate()
+					.try_for_each(|(index, part)| {
+						if index == 0 {write!(f, "{}", part)}
+						else {write!(f, ".{}", part)}
+					})?;
+				write!(f, ":{}(", name)?;
+				arguments.iter().enumerate()
+					.try_for_each(|(index, expr)| {
+						if index == 0 {write!(f, "{}", expr)}
+						else {write!(f, ", {}", expr)}
+					})?;
+				write!(f, ")\n{}end", body)
+			}
 		}
 	}
 }
@@ -1159,6 +1207,14 @@ impl Display for Expression {
 				})?;
 				write!(f, ")")
 			},
+			
+			Self::MethodCall {class, method, arguments} => {
+				write!(f, "{}:{}(", class, method)?;
+				arguments.iter().enumerate().try_for_each(|(index, expr)| {
+					if index == 0 {write!(f, "{}", expr)} else {write!(f, ", {}", expr)}
+				})?;
+				write!(f, ")")
+			},
 
 			Self::Index {indexee, index} => write!(f, "{}[{}]", indexee, index),
 
@@ -1169,9 +1225,7 @@ impl Display for Expression {
 				write!(f, "not {}", operand),
 
 			Self::UnaryOperation {operator, operand} =>
-				write!(f, "{}{}", operator, operand),
-
-			_ => todo!()
+				write!(f, "{}{}", operator, operand)
 		}
 	}
 }

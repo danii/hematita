@@ -250,7 +250,7 @@ impl Display for Value<'_> {
 			Self::String(string) => write!(f, "{}", string),
 			Self::Boolean(boolean) => write!(f, "{}", boolean),
 			Self::Table(table) => write!(f, "{}", table),
-			Self::UserData {..} => todo!(),
+			Self::UserData {data, ..} => write!(f, "userdata: {:p}", *data),
 			Self::Function(function) => write!(f, "{}", function),
 			Self::NativeFunction(function) => write!(f, "function: {:p}", *function)
 		}
@@ -264,7 +264,7 @@ impl Debug for Value<'_> {
 			Self::String(string) => Debug::fmt(string, f),
 			Self::Boolean(boolean) => Debug::fmt(boolean, f),
 			Self::Table(table) => Debug::fmt(table, f),
-			Self::UserData {..} => todo!(),
+			Self::UserData {data, ..} => write!(f, "userdata: {:p}", data),
 			Self::Function(function) => Debug::fmt(function, f),
 			Self::NativeFunction(function) => write!(f, "function: {:p}", function)
 		}
@@ -472,10 +472,15 @@ pub struct Table<'n> {
 
 impl<'n> Table<'n> {
 	/// Inserts a value into this table as if it was an array.
+	///
+	/// Panics
+	/// ------
+	/// Panics if any encountered lock is poisoned.
 	#[inline]
 	pub fn array_insert(&self, index: i64, mut value: Nillable<'n>) {
 		let len = self.array_len();
-		let mut data = self.data.lock().unwrap();
+		// TODO: Return this error? There's a lot more below. (breaking change)
+		let mut data = self.data.lock().expect("poison error");
 
 		(index..=(len.max(1) + 1))
 			.for_each(|index| match take(&mut value) {
@@ -486,10 +491,13 @@ impl<'n> Table<'n> {
 			});
 	}
 
+	/// Panics
+	/// ------
+	/// Panics if any encountered lock is poisoned.
 	#[inline]
 	pub fn array_remove(&self, index: i64) -> Nillable<'n> {
 		let len = self.array_len();
-		let mut data = self.data.lock().unwrap();
+		let mut data = self.data.lock().expect("poison error");
 
 		let mut value = Nil;
 		(index..=len).rev()
@@ -507,22 +515,34 @@ impl<'n> Table<'n> {
 		self.array_insert(self.array_len(), value)
 	}
 
+	/// Panics
+	/// ------
+	/// Panics if any encountered lock is poisoned.
+	#[inline]
 	pub fn array_len(&self) -> i64 {
-		self.data.lock().unwrap().iter()
+		self.data.lock().expect("poison error").iter()
 			.filter_map(|(key, _)| key.integer())
 			.fold(0, |result, index| result.max(index))
 	}
 
+	/// Panics
+	/// ------
+	/// Panics if any encountered lock is poisoned.
+	#[inline]
 	pub fn array_is_empty(&self) -> bool {
-		self.data.lock().unwrap().iter()
+		self.data.lock().expect("poison error").iter()
 			.any(|(key, _)| key.integer().is_some())
 	}
 
 	/// Inserts a value into this table as if it was a tuple.
+	///
+	/// Panics
+	/// ------
+	/// Panics if any encountered lock is poisoned.
 	#[inline]
 	pub fn tuple_insert(&self, index: i64, mut value: Nillable<'n>) {
 		let len = self.tuple_len();
-		let mut data = self.data.lock().unwrap();
+		let mut data = self.data.lock().expect("poison error");
 		data.insert(Value::Integer(0), Value::Integer(len + 1));
 
 		(index..=(len.max(1) + 1))
@@ -534,11 +554,20 @@ impl<'n> Table<'n> {
 			});
 	}
 
+	/// Panics
+	/// ------
+	/// Panics if any encountered lock is poisoned.
+	#[inline]
 	pub fn tuple_len(&self) -> i64 {
-		self.data.lock().unwrap().get(&Value::Integer(0))
-			.unwrap().integer().unwrap()
+		// TODO: Return???
+		self.data.lock().expect("poison error").get(&Value::Integer(0))
+			.and_then(Value::integer).expect("tuple convention error")
 	}
 
+	/// Panics
+	/// ------
+	/// Panics if any encountered lock is poisoned.
+	#[inline]
 	pub fn index<'qn>(&self, index: &Value<'qn>) -> Nillable<'n> {
 		// std::collections::HashMap::get's signature is overly strict. It requires
 		// that Q lives as long as K does, but it only uses Q as long as the call.
@@ -549,12 +578,11 @@ impl<'n> Table<'n> {
 		// stablized? Or is it better to have something that can be upgraded
 		// according to semver?
 
-		let data = self.data.lock().unwrap();
+		let data = self.data.lock().expect("poison error");
 		let mut hasher = data.hasher().build_hasher();
 		index.hash(&mut hasher);
 		data.raw_entry().from_hash(hasher.finish(), |check| index == check)
 			.map(|(_, value)| value).cloned().nillable()
-		//todo!()
 	}
 
 	pub fn arc(self) -> Arc<Self> {

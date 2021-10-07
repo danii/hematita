@@ -752,7 +752,7 @@ impl Generator {
 				let right = self.compile_expression(right).register(self);
 				let destination = self.register();
 				self.opcode(OpCode::BinaryOperation {left, right, destination,
-					operation: (*operator).try_into().unwrap()});
+					operation: (*operator).try_into().expect("unreachable")});
 				CompileResult::Register(destination, false)
 			},
 
