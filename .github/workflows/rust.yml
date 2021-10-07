@@ -10,7 +10,7 @@ env:
 
 jobs:
   check_test:
-    name: Check & Test
+    name: Clippy, Check & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -19,5 +19,7 @@ jobs:
           luaVersion: "5.4.1"
       - name: Check
         run: cargo check
+      - name: Clippy
+        run: cargo clippy
       - name: Test
         run: cargo test
