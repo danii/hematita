@@ -70,10 +70,10 @@ macro_rules! lua_table {
 		{
 			use $crate::{
 				vm::value::{IntoNillable, Nillable::NonNil, Table, Value},
+				__priv_macro_rexport__hashbrown::HashMap,
+				__priv_macro_rexport__std::{default::Default, sync::Mutex},
 				lua_table_inner, lua_value
 			};
-			use hashbrown::HashMap;
-			use std::{default::Default, sync::Mutex};
 
 			let mut table = HashMap::<Value, Value>::new();
 			let mut counter = 1;
@@ -131,10 +131,10 @@ macro_rules! lua_tuple {
 		{
 			use $crate::{
 				vm::value::{IntoNillable, Nillable::NonNil, Table, Value},
+				__priv_macro_rexport__hashbrown::HashMap,
+				__priv_macro_rexport__std::{default::Default, sync::Mutex},
 				lua_tuple_inner, lua_value
 			};
-			use hashbrown::HashMap;
-			use std::{default::Default, sync::Mutex};
 
 			let mut table = HashMap::<Value, Value>::new();
 			let mut counter = 0;

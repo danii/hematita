@@ -80,3 +80,17 @@ pub mod ast;
 pub mod compiler;
 pub mod lua_lib;
 pub mod vm;
+
+/// Macro implementation detail, do not use.
+///
+/// This does *NOT* follow the crates semantic version, using this attribute
+/// *WILL* break your crate when *(not a matter of if)* we change this.
+#[doc(hidden)]
+pub use hashbrown as __priv_macro_rexport__hashbrown;
+
+/// Macro implementation detail, do not use.
+///
+/// This does *NOT* follow the crates semantic version, using this attribute
+/// *WILL* break your crate when *(not a matter of if)* we change this.
+#[doc(hidden)]
+pub use std as __priv_macro_rexport__std;
