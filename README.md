@@ -1,4 +1,4 @@
-Hematita Da Lua
+Hematita da Lua
 ===============
 ![](https://img.shields.io/crates/d/hematitia?style=for-the-badge) ![](https://img.shields.io/tokei/lines/github/danii/hematita?style=for-the-badge) ![](https://img.shields.io/crates/v/hematita?style=for-the-badge) ![](https://img.shields.io/badge/compiler%20version-1.53.0-007EC6?style=for-the-badge)
 <br>
@@ -33,7 +33,7 @@ The `--byte-code`, `--ast`, and `--tokens` options all change the output of the 
 
 Embedding Hematita
 ------------------
-Embedding Hematitia is fairly straight forward and only requires stringing together each segment of the interpreter. As always, require the crate in your `Cargo.toml`. Then, you're just six lines of code away from running Lua code in your next big project.
+Embedding Hematita is fairly straight forward and only requires stringing together each segment of the interpreter. As always, require the crate in your `Cargo.toml`. Then, you're just six lines of code away from running Lua code in your next big project.
 ```rust
 use hematita::{ast::{lexer, parser}, compiler, vm, lua_lib, lua_tuple};
 
