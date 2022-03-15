@@ -1,10 +1,10 @@
-Hematita Da Lua
+Hematita da Lua
 ===============
 ![](https://img.shields.io/crates/d/hematitia?style=for-the-badge) ![](https://img.shields.io/tokei/lines/github/danii/hematita?style=for-the-badge) ![](https://img.shields.io/crates/v/hematita?style=for-the-badge) ![](https://img.shields.io/badge/compiler%20version-1.53.0-007EC6?style=for-the-badge)
 <br>
 [![](https://img.shields.io/badge/crates.io-E6B14C?style=for-the-badge&logo=rust&logoColor=000000)](https://crates.io/crates/hematita) [![](https://img.shields.io/badge/lib.rs-282A36?style=for-the-badge&logo=rust)](https://lib.rs/crates/hematita) [![](https://img.shields.io/badge/github.com-24292E?style=for-the-badge&logo=github)](https://github.com/danii/hematita) [![](https://img.shields.io/badge/sponsor_me-FF69B4?style=for-the-badge&logo=github%20sponsors&logoColor=FFFFFF)](https://github.com/sponsors/danii) [![](https://img.shields.io/badge/telegram_group-26A5E4?style=for-the-badge&logo=telegram)](https://t.me/danii_hangout)
 
-Hematita Da Lua is an interpreter for the scripting language Lua, written entirely in 100% safe Rust. Hematita is the portugese word for hematite, a type of iron oxide, or rust, and lua is the portugese word for moon. 'Hematita Da Lua' is a pun on what the project is, and the discovery that [iron on the moon is rusting](https://www.nasa.gov/feature/jpl/the-moon-is-rusting-and-researchers-want-to-know-why).
+Hematita da Lua is an interpreter for the scripting language Lua, written entirely in 100% safe Rust. Hematita is the portugese word for hematite, a type of iron oxide, or rust, and lua is the portugese word for moon. 'Hematita Da Lua' is a pun on what the project is, and the discovery that [iron on the moon is rusting](https://www.nasa.gov/feature/jpl/the-moon-is-rusting-and-researchers-want-to-know-why).
 
 The purpose of the project is to provide a hardened Lua interpreter resiliant to security vulnerabilities. It accomplishes this by using no unsafe code, being compileable on stable, and by relying upon a minimal number of dependencies. With this, we can be confident we are safe from any yet-to-be-found security vulnerabilities in C code. No disrespect to the standard Lua implementation and other C projects.
 
@@ -33,7 +33,7 @@ The `--byte-code`, `--ast`, and `--tokens` options all change the output of the 
 
 Embedding Hematita
 ------------------
-Embedding Hematitia is fairly straight forward and only requires stringing together each segment of the interpreter. As always, require the crate in your `Cargo.toml`. Then, you're just six lines of code away from running Lua code in your next big project.
+Embedding Hematita is fairly straight forward and only requires stringing together each segment of the interpreter. As always, require the crate in your `Cargo.toml`. Then, you're just six lines of code away from running Lua code in your next big project.
 ```rust
 use hematita::{ast::{lexer, parser}, compiler, vm, lua_lib, lua_tuple};
 
