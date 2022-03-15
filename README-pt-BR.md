@@ -76,3 +76,25 @@ let global = {
 	globals
 };
 ```
+
+O mesmo vale para criar seus próprios dados de usuário. Faça um tipo, implemente `vm::value::UserData` para ele e insira-o no escopo global com `Value::UserData`. (Ou, se preferir, crie uma função de função nativa que a retorne.) Como é típico na implementação de seus próprios dados de usuário, a grande maioria de seu tipo será implementada por meio da metatabela. Você pode bloquear sua metatabela adicionando uma entrada `__metatable` nela.
+
+Os Internos
+-------------
+A Hematita é composta por quatro segmentos principais. São eles, `ast::lexer`, `ast::parser`, `compiler` e `vm`, cada segmento dependendo do último. Cada segmento representa um processo diferente, o `lexer` é o processo de lexing, o `parser` é o processo de análise, e assim por diante.
+
+Cada segmento pode ser usado sozinho, mas é melhor usá-los juntos. Se você quiser apenas lex e analisar código lua, o módulo `ast` pode lidar totalmente com isso. Se você quiser apenas executar bytecode feito à mão, o módulo `vm` é adequado para isso. Mas o efeito real vem de juntar tudo, para formar um intérprete completo.
+
+### O Lexer
+O lexer apenas transforma um fluxo de caracteres em um fluxo de `Token`s. É efetivamente apenas uma operação sobre um iterador. Você pode ler seus documentos [aqui](https://docs.rs/hematita/0.1.0/hematita/ast/lexer/index.html), observe que eles estão incompletos.
+
+### O analisador
+O analisador recebe um fluxo de tokens e o transforma em um 'Bloco'. Um `Block` é apenas um `Vec` de `Statement`s. `Statement`s são uma representação interna de uma instrução Lua. Você pode ler seus documentos [aqui](https://docs.rs/hematita/0.1.0/hematita/ast/parser/index.html), observe que eles estão incompletos.
+
+### O compilador
+O compilador pega um `Block` e produz um `Chunk`. Um `Chunk` é apenas um `Vec` de `OpCode`s, com alguns metadados. É efetivamente uma transformação de um para um, portanto, nenhum tratamento de erros é necessário. Você pode ler seus documentos [aqui](https://docs.rs/hematita/0.1.0/hematita/compiler/index.html), observe que eles estão incompletos.
+
+### A máquina virtual
+A máquina virtual pega uma `Function` e a executa. Uma `Função` é apenas uma forma instanciada de um `Chunk`, com valores associados associados. Isso pode ser feito apenas chamando `into` em um `Chunk`. A máquina virtual é efetivamente uma declaração de correspondência sobre cada `OpCode` e o código que a implementa. Você pode ler seus documentos [aqui](https://docs.rs/hematita/0.1.0/hematita/vm/index.html), observe que eles estão incompletos.
+
+[internals]: #the-internals
