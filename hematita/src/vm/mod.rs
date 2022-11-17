@@ -3,6 +3,8 @@ pub mod value;
 #[cfg(test)]
 pub mod tests;
 
+use crate::double::Double;
+
 use self::{
 	super::{
 		lua_tuple,
@@ -333,6 +335,12 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 					// TODO: Handle overflow...
 					(NonNil(Value::Integer(left)), NonNil(Value::Integer(right)),
 							BinaryOperation::Add) => NonNil(Value::Integer(left + right)),
+					(NonNil(Value::Double(left)), NonNil(Value::Double(right)),
+							BinaryOperation::Add) => NonNil(Value::Double(left + right)),
+					(NonNil(Value::Integer(left)), NonNil(Value::Double(right)),
+							BinaryOperation::Add) => NonNil(Value::Double(Double(left as f64) + right)),
+					(NonNil(Value::Double(left)), NonNil(Value::Integer(right)),
+							BinaryOperation::Add) => NonNil(Value::Double(left + right as f64)),
 					(left, right, BinaryOperation::Add)
 							if self.meta_method(&left, "__add").is_non_nil() => {
 						let meta = self.meta_method(&left, "__add");
@@ -350,6 +358,13 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 					// TODO: Handle overflow...
 					(NonNil(Value::Integer(left)), NonNil(Value::Integer(right)),
 							BinaryOperation::Subtract) => NonNil(Value::Integer(left - right)),
+					(NonNil(Value::Double(left)), NonNil(Value::Double(right)),
+							BinaryOperation::Subtract) => NonNil(Value::Double(left - right)),
+					(NonNil(Value::Integer(left)), NonNil(Value::Double(right)),
+							BinaryOperation::Subtract) => NonNil(Value::Double(Double(left as f64) - right)),
+					(NonNil(Value::Double(left)), NonNil(Value::Integer(right)),
+							BinaryOperation::Subtract) => NonNil(Value::Double(left - right as f64)),
+
 					(left, right, BinaryOperation::Subtract)
 							if self.meta_method(&left, "__sub").is_non_nil() => {
 						let meta = self.meta_method(&left, "__sub");
@@ -367,6 +382,13 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 					// TODO: Handle overflow...
 					(NonNil(Value::Integer(left)), NonNil(Value::Integer(right)),
 							BinaryOperation::Multiply) => NonNil(Value::Integer(left * right)),
+					(NonNil(Value::Double(left)), NonNil(Value::Double(right)),
+							BinaryOperation::Multiply) => NonNil(Value::Double(left * right)),
+					(NonNil(Value::Integer(left)), NonNil(Value::Double(right)),
+							BinaryOperation::Multiply) => NonNil(Value::Double(Double(left as f64) * right)),
+					(NonNil(Value::Double(left)), NonNil(Value::Integer(right)),
+							BinaryOperation::Multiply) => NonNil(Value::Double(left * right as f64)),
+
 					(left, right, BinaryOperation::Multiply)
 							if self.meta_method(&left, "__mul").is_non_nil() => {
 						let meta = self.meta_method(&left, "__mul");
@@ -385,6 +407,13 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 					// TODO: Handle division by zero...
 					(NonNil(Value::Integer(left)), NonNil(Value::Integer(right)),
 							BinaryOperation::Divide) => NonNil(Value::Integer(left / right)),
+					(NonNil(Value::Double(left)), NonNil(Value::Double(right)),
+							BinaryOperation::Divide) => NonNil(Value::Double(left / right)),
+					(NonNil(Value::Integer(left)), NonNil(Value::Double(right)),
+							BinaryOperation::Divide) => NonNil(Value::Double(Double(left as f64) / right)),
+					(NonNil(Value::Double(left)), NonNil(Value::Integer(right)),
+							BinaryOperation::Divide) => NonNil(Value::Double(left / right as f64)),
+
 					(left, right, BinaryOperation::Divide)
 							if self.meta_method(&left, "__div").is_non_nil() => {
 						let meta = self.meta_method(&left, "__div");
