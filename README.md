@@ -6,9 +6,9 @@ Hematita Da Lua
 
 Hematita Da Lua is an interpreter for the scripting language Lua, written entirely in 100% safe Rust. Hematita is the portugese word for hematite, a type of iron oxide, or rust, and lua is the portugese word for moon. 'Hematita Da Lua' is a pun on what the project is, and the discovery that [iron on the moon is rusting](https://www.nasa.gov/feature/jpl/the-moon-is-rusting-and-researchers-want-to-know-why).
 
-The purpose of the project is to provide a hardened Lua interpreter resiliant to security vulnerabilities. It accomplishes this by using no unsafe code, being compileable on stable, and by relying upon a minimal number of dependencies. With this, we can be confident we are safe from any yet-to-be-found security vulnerabilities in C code. No disrespect to the standard Lua implementation and other C projects.
+The purpose of the project is to provide a hardened Lua interpreter resilient to security vulnerabilities. It accomplishes this by using no unsafe code, being compileable on stable, and by relying upon a minimal number of dependencies. With this, we can be confident we are safe from any yet-to-be-found security vulnerabilities in C code. No disrespect to the standard Lua implementation and other C projects.
 
-That said, it is important to note that *Hematita is not stable*, is *very early in it's development* and *may be buggy*. It is my hope that, with enough time to mature, Hematita will be able to garuntee these things.
+That said, it is important to note that *Hematita is not stable*, is *very early in it's development* and *may be buggy*. It is my hope that, with enough time to mature, Hematita will be able to guarantee these things.
 
 Running Hematita Standalone
 ---------------------------
