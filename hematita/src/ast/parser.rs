@@ -1,3 +1,5 @@
+use crate::double::Double;
+
 use self::super::{
 	Error as ASTError, Result,
 	lexer::{Result as LexerResult, Token}
@@ -144,6 +146,15 @@ impl<I> TokenIterator<I>
 			_ => unreachable!()
 		}
 	}
+
+	/// Returns the next token, assuming it was peeked and matched as a float.
+	fn double(&mut self) -> Double {
+		match self.next() {
+			Some(Ok(Token::Double(double))) => double,
+			_ => unreachable!()
+		}
+	}
+
 
 	/// Peeks the next token, if any.
 	fn peek(&mut self) -> Option<LexerResult<Token>> {
@@ -418,6 +429,7 @@ pub fn parse_expression_primary<I>(iter: &mut TokenIterator<I>)
 			parse_expression_inner(iter, Expression::Identifier(identifier))?
 		},
 		Some(Token::Integer(_)) => Expression::Integer(iter.integer()),
+		Some(Token::Double(_)) => Expression::Double(iter.double()),
 		Some(Token::String(_)) => Expression::String(iter.string()),
 
 		// Simple literals
@@ -1085,6 +1097,9 @@ pub enum Expression {
 	/// A literal integer.
 	Integer(i64),
 
+	/// A literal double.
+	Double(Double),
+
 	/// A literal string.
 	String(String),
 
@@ -1167,6 +1182,7 @@ impl Display for Expression {
 			// Literals
 
 			Self::Integer(integer) => write!(f, "{}", integer),
+			Self::Double(double) => write!(f, "{}", double.0),
 			Self::String(string) => write!(f, "{:?}", string),
 
 			// Complicated literals

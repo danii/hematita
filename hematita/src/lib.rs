@@ -80,6 +80,7 @@ pub mod ast;
 pub mod compiler;
 pub mod lua_lib;
 pub mod vm;
+pub mod double;
 
 /// Macro implementation detail, do not use.
 ///

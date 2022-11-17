@@ -194,6 +194,15 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 				let meta = meta.data.lock().expect("poison error");
 				meta.get(&Value::new_string(method)).nillable()
 			},
+			NonNil(Value::Double(_)) => {
+				let meta = match self.virtual_machine.number_meta.as_ref() {
+					Some(meta) => meta,
+					None => return Nil
+				};
+
+				let meta = meta.data.lock().expect("poison error");
+				meta.get(&Value::new_string(method)).nillable()
+			},
 			NonNil(Value::String(_)) => {
 				let meta = match self.virtual_machine.string_meta.as_ref() {
 					Some(meta) => meta,
@@ -544,6 +553,7 @@ impl<'v, 'f, 'n> StackFrame<'v, 'f, 'n> {
 						Some(Constant::String(string)) =>
 							NonNil(Value::String(string.into_boxed_str())),
 						Some(Constant::Integer(integer)) => NonNil(Value::Integer(integer)),
+						Some(Constant::Double(double)) => NonNil(Value::Double(double)),
 						Some(Constant::Boolean(boolean)) => NonNil(Value::Boolean(boolean)),
 						Some(Constant::Chunk(chunk)) => {
 							let up_values = chunk.up_values.iter()

@@ -1,3 +1,5 @@
+use crate::double::Double;
+
 pub use self::{super::{Chunk, VirtualMachine}, Nillable::{Nil, NonNil}};
 use hashbrown::HashMap;
 use std::{borrow::Borrow, fmt::{Debug, Display, Formatter, Result as FMTResult}, hash::{BuildHasher, Hash, Hasher}, mem::take, ptr::{eq, hash}, sync::{Arc, Mutex}};
@@ -177,6 +179,7 @@ pub type NativeFunction<'n> = &'n (dyn Fn(Arc<Table<'n>>, &VirtualMachine<'n>)
 #[derive(Clone)]
 pub enum Value<'n> {
 	Integer(i64),
+	Double(Double),
 	String(Box<str>),
 	Boolean(bool),
 	Table(Arc<Table<'n>>),
@@ -196,6 +199,7 @@ impl<'n> Value<'n> {
 	pub fn type_name(&self) -> &'static str {
 		match self {
 			Self::Integer(_) => "number",
+			Self::Double(_) => "number",
 			Self::String(_) => "string",
 			Self::Boolean(_) => "boolean",
 			Self::Table(_) => "table",
@@ -259,6 +263,7 @@ impl Display for Value<'_> {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		match self {
 			Self::Integer(integer) => write!(f, "{}", integer),
+			Self::Double(double) => write!(f, "{}", double.0),
 			Self::String(string) => write!(f, "{}", string),
 			Self::Boolean(boolean) => write!(f, "{}", boolean),
 			Self::Table(table) => write!(f, "{}", table),
@@ -273,6 +278,7 @@ impl Debug for Value<'_> {
 	fn fmt(&self, f: &mut Formatter) -> FMTResult {
 		match self {
 			Self::Integer(integer) => Debug::fmt(integer, f),
+			Self::Double(double) => Debug::fmt(&double.0, f),
 			Self::String(string) => Debug::fmt(string, f),
 			Self::Boolean(boolean) => Debug::fmt(boolean, f),
 			Self::Table(table) => Debug::fmt(table, f),
@@ -289,6 +295,7 @@ impl<'l, 'r> PartialEq<Value<'r>> for Value<'l> {
 	fn eq(&self, other: &Value<'r>) -> bool {
 		match (self, other) {
 			(Self::Integer(a), Value::Integer(b)) => *a == *b,
+			(Self::Double(a), Value::Double(b)) => *a == *b,
 			(Self::String(a), Value::String(b)) => *a == *b,
 			(Self::Boolean(a), Value::Boolean(b)) => *a == *b,
 			(Self::Function(a), Value::Function(b)) =>
@@ -307,6 +314,7 @@ impl Hash for Value<'_> {
 			where H: Hasher {
 		match self {
 			Self::Integer(integer) => integer.hash(state),
+			Self::Double(double) => double.hash(state),
 			Self::String(string) => string.hash(state),
 			Self::Boolean(boolean) => boolean.hash(state),
 			Self::Table(arc) => Arc::as_ptr(arc).hash(state),
@@ -319,6 +327,8 @@ impl Hash for Value<'_> {
 
 value_conversions! {
 	impl<'n> for value @ i64 {Value::Integer(value)}
+	impl<'n> for value @ Double {Value::Double(value)}
+	impl<'n> for value @ f64 {Value::Double(Double(value))}
 	impl<'n; 'r> for value @ &'r str {Value::String(value.into())}
 	impl<'n> for value @ Box<str> {Value::String(value)}
 	impl<'n> for value @ String {Value::String(value.into_boxed_str())}
@@ -684,7 +694,9 @@ impl From<Chunk> for Function<'_> {
 
 #[cfg(test)]
 mod tests {
-	use self::super::{Function, Table, Value};
+	use crate::double::Double;
+
+use self::super::{Function, Table, Value};
 	use hashbrown::HashMap;
 	use std::{hash::{BuildHasher, Hash, Hasher}, ptr::eq as ptr_eq, sync::Mutex};
 
@@ -719,6 +731,8 @@ mod tests {
 	fn value_matches(a: &Value, b: &Value) -> bool {
 		match (a, b) {
 			(Value::Integer(a), Value::Integer(b)) =>
+				a == b,
+			(Value::Double(a), Value::Double(b)) =>
 				a == b,
 			(Value::String(a), Value::String(b)) =>
 				a == b,
@@ -765,6 +779,7 @@ mod tests {
 	#[test]
 	fn test_lua_value_literal() {
 		assert_eq!(lua_value!(12), Value::Integer(12));
+		assert_eq!(lua_value!(1.1), Value::Double(Double(1.1)));
 		assert_eq!(lua_value!("epic sauce"), Value::String("epic sauce".into()));
 		assert_eq!(lua_value!(true), Value::Boolean(true));
 	}

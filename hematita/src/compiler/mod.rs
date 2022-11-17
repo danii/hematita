@@ -102,6 +102,7 @@ impl Generator {
 				return register
 			},
 			KnownValue::Integer(value) => Constant::Integer(value),
+			KnownValue::Double(value) => Constant::Double(value),
 			KnownValue::String(value) => Constant::String(value),
 			KnownValue::Boolean(value) => Constant::Boolean(value)
 		};
@@ -629,6 +630,8 @@ impl Generator {
 			// Same with these.
 			Expression::Integer(integer) =>
 				CompileResult::Evaluated(KnownValue::Integer(*integer)),
+			Expression::Double(double) =>
+				CompileResult::Evaluated(KnownValue::Double(*double)),
 			Expression::String(string) =>
 				CompileResult::Evaluated(KnownValue::String(string.clone())),
 

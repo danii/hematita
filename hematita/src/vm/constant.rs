@@ -1,3 +1,5 @@
+use crate::double::Double;
+
 use self::super::Chunk;
 use std::{fmt::{Display, Formatter, Result as FMTResult}, sync::Arc};
 
@@ -5,6 +7,7 @@ use std::{fmt::{Display, Formatter, Result as FMTResult}, sync::Arc};
 pub enum Constant {
 	String(String),
 	Integer(i64),
+	Double(Double),
 	Boolean(bool),
 	Chunk(Arc<Chunk>)
 }
@@ -14,6 +17,7 @@ impl Display for Constant {
 		match self {
 			Self::String(string) => write!(f, "{:?}", string),
 			Self::Integer(integer) => write!(f, "{}", integer),
+			Self::Double(double) => write!(f, "{}", double.0),
 			Self::Boolean(boolean) => write!(f, "{}", boolean),
 			Self::Chunk(chunk) => write!(f, "{}", chunk)
 		}
@@ -25,6 +29,7 @@ impl Display for Constant {
 pub enum KnownValue {
 	String(String),
 	Integer(i64),
+	Double(Double),
 	Boolean(bool),
 	Nil
 }
