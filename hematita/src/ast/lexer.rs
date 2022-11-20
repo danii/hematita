@@ -78,8 +78,7 @@ impl<T> Lexer<T>
 	/// return Ok(Token::OpenParen)
 	/// # }
 	/// ```
-	#[cfg_attr(test, visibility::make(pub))]
-	fn eat(&mut self) {
+	pub(crate) fn eat(&mut self) {
 		self.peeked_next();
 	}
 
@@ -98,8 +97,7 @@ impl<T> Lexer<T>
 	/// assert_eq!(lexer.source.next(), Some('e'));
 	/// ```
 	#[must_use = "all characters should be consumed, if you already peeked this, you should use `eat`"]
-	#[cfg_attr(test, visibility::make(pub))]
-	fn next(&mut self) -> Option<char> {
+	pub(crate) fn next(&mut self) -> Option<char> {
 		self.source.next()
 	}
 
@@ -133,8 +131,7 @@ impl<T> Lexer<T>
 	/// 	_ => ()
 	/// }
 	/// ```
-	#[cfg_attr(test, visibility::make(pub))]
-	fn peeked_next(&mut self) -> char {
+	pub(crate) fn peeked_next(&mut self) -> char {
 		match self.next() {
 			Some(next) => next,
 			None => unreachable!("called peeked_next when there wasn't anything next")
@@ -157,8 +154,7 @@ impl<T> Lexer<T>
 	/// assert_eq!(lexer.next(), Some('h'));
 	/// assert_eq!(lexer.peek(), Some('e'));
 	/// ```
-	#[cfg_attr(test, visibility::make(pub))]
-	fn peek(&mut self) -> Option<char> {
+	pub(crate) fn peek(&mut self) -> Option<char> {
 		self.source.peek().map(Clone::clone)
 	}
 
@@ -181,8 +177,7 @@ impl<T> Lexer<T>
 	/// iter.eat();
 	/// assert_eq!(iter.parse_whitespace(), Some('d'));
 	/// ```
-	#[cfg_attr(test, visibility::make(pub))]
-	fn parse_whitespace(&mut self) -> Option<char> {
+	pub(crate) fn parse_whitespace(&mut self) -> Option<char> {
 		loop {
 			match self.peek()? {
 				' ' | '\n' | '\r' | '\t' => self.eat(),
@@ -211,8 +206,7 @@ impl<T> Lexer<T>
 	/// assert_eq!(lexer.parse_identifier(),
 	/// 	Some(Token::Identifier("ok".to_string())));
 	/// ```
-	#[cfg_attr(test, visibility::make(pub))]
-	fn parse_identifier(&mut self) -> Token {
+	pub(crate) fn parse_identifier(&mut self) -> Token {
 		let mut identifier = String::new();
 
 		while let Some('a'..='z' | 'A'..='Z' | '0'..='9' | '_') = self.peek()
@@ -259,8 +253,7 @@ impl<T> Lexer<T>
 	/// assert_eq!(lexer.parse_string(),
 	/// 	Some(Token::String("hi\n".to_owned())));
 	/// ```
-	#[cfg_attr(test, visibility::make(pub))]
-	fn parse_string(&mut self) -> Option<Result<Token>> {
+	pub(crate) fn parse_string(&mut self) -> Option<Result<Token>> {
 		let delimiter = self.peeked_next();
 		let mut string = String::new();
 
@@ -302,8 +295,7 @@ impl<T> Lexer<T>
 	/// assert_eq!(lexer.parse_bracketed_string(),
 	/// 	Some(Some(Token::String("hi\\n".to_owned()))));
 	/// ```
-	#[cfg_attr(test, visibility::make(pub))]
-	fn parse_bracketed_string(&mut self) -> Option<Token> {
+	pub(crate) fn parse_bracketed_string(&mut self) -> Option<Token> {
 		self.parse_bracketed().map(Token::String)
 	}
 
@@ -319,8 +311,7 @@ impl<T> Lexer<T>
 	///
 	/// assert_eq!(lexer.parse_number(), Some(Token::Integer(123)));
 	/// ```
-	#[cfg_attr(test, visibility::make(pub))]
-	fn parse_number(&mut self) -> Result<Token> {
+	pub(crate) fn parse_number(&mut self) -> Result<Token> {
 		let mut number = String::new();
 		while let Some('0'..='9') = self.peek()
 			{number.push(self.peeked_next())}
@@ -343,8 +334,7 @@ impl<T> Lexer<T>
 	/// assert_eq!(lexer.parse_comment(),
 	/// 	Some(Token::Comment(" comment!".to_owned())));
 	/// ```
-	#[cfg_attr(test, visibility::make(pub))]
-	fn parse_comment(&mut self) -> Option<Token> {
+	pub(crate) fn parse_comment(&mut self) -> Option<Token> {
 		match self.peek()? {
 			'[' => self.parse_bracketed().map(Token::Comment),
 			_ => {
@@ -368,8 +358,7 @@ impl<T> Lexer<T>
 	///
 	/// [string]: Self::parse_bracketed_string
 	/// [comment]: Self::parse_comment
-	#[cfg_attr(test, visibility::make(pub))]
-	fn parse_bracketed(&mut self) -> Option<String> {
+	pub(crate) fn parse_bracketed(&mut self) -> Option<String> {
 		let mut string = String::new();
 		let length = {
 			let mut length = 0usize;
