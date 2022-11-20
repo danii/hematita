@@ -1098,7 +1098,7 @@ macro_rules! byte_code {
 		byte_code {
 			index: 0,
 			next: move |index| {
-				#[allow(unused_mut, unused_variable, unused_assignments)]
+				#[allow(unused_assignments)]
 				{
 					let mut counter = 0;
 					let value = byte_code_inner!(index counter {$($code)*});
